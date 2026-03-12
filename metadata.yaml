@@ -1,0 +1,7 @@
+name: "NapCat QQ Manager"
+author: "AstrBot Team"
+description: "NapCat QQ 容器管理插件，支持容器创建、启动、停止、重启、删除等操作"
+display_name: "NapCat 管理插件"
+version: "1.0.0"
+repo: "https://github.com/Soulter/AstrBot"
+

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <style>
+        body {
+            transform: scale(1);
+            width: 830px;
+            margin: 0;
+            padding: 0;
+            background: url('{{ bg_image }}') center/cover no-repeat;
+            font-family: "Microsoft YaHei", "微软雅黑", Arial, sans-serif;
+        }
+        .container {
+            background: url('{{ main_image }}') top left no-repeat;
+            background-size: 100% auto;
+            width: 830px;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .info-box {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .head-box {
+            margin: 60px 0 0 0;
+            padding-bottom: 0;
+            text-align: center;
+        }
+        .head-box .title {
+            font-size: 50px;
+            color: #ceb78b;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+            margin-bottom: 10px;
+        }
+        .head-box .label {
+            font-size: 18px;
+            color: #eee;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        }
+        .cont-box {
+            border-radius: 15px;
+            margin-top: 20px;
+            margin-bottom: 20px;
+            overflow: hidden;
+            box-shadow: 0 5px 10px 0 rgba(0, 0, 0, 0.15);
+            position: relative;
+            background: rgba(6, 21, 31, 0.5);
+            backdrop-filter: blur(3px);
+        }
+        .help-group {
+            font-size: 18px;
+            font-weight: bold;
+            padding: 15px 15px 10px 20px;
+            color: #ceb78b;
+            background: rgba(6, 21, 31, 0.4);
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        }
+        .help-table {
+            text-align: center;
+            border-collapse: collapse;
+            margin: 0;
+            border-radius: 0 0 10px 10px;
+            display: table;
+            overflow: hidden;
+            width: 100%;
+            color: #fff;
+        }
+        .help-table .tr {
+            display: table-row;
+        }
+        .help-table .td {
+            font-size: 14px;
+            display: table-cell;
+            box-shadow: 0 0 1px 0 #888 inset;
+            padding: 12px 0 12px 50px;
+            line-height: 24px;
+            position: relative;
+            text-align: left;
+            width: {{ col_width }}%;
+        }
+        .help-table .tr:nth-child(odd) .td {
+            background: rgba(6, 21, 31, 0.2);
+        }
+        .help-table .tr:nth-child(even) .td {
+            background: rgba(6, 21, 31, 0.35);
+        }
+        .help-table .tr:last-child .td {
+            padding-bottom: 12px;
+        }
+        .help-icon {
+            width: 40px;
+            height: 40px;
+            display: block;
+            position: absolute;
+            background: url('{{ icon_image }}') 0 0 no-repeat;
+            background-size: 500px auto;
+            border-radius: 5px;
+            left: 6px;
+            top: 12px;
+            transform: scale(0.85);
+        }
+        .help-title {
+            display: block;
+            color: #d3bc8e;
+            font-size: 16px;
+            line-height: 24px;
+            font-weight: bold;
+        }
+        .help-desc {
+            display: block;
+            font-size: 13px;
+            line-height: 18px;
+            color: #eee;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="info-box">
+            <div class="head-box">
+                <div class="title">{{ title }}</div>
+                <div class="label">{{ subtitle }}</div>
+            </div>
+        </div>
+
+        {% for group in groups %}
+        <div class="cont-box">
+            <div class="help-group">{{ group.group }}</div>
+            {% if group.list %}
+            <div class="help-table">
+                {% for i in range(0, group.list|length, col_count) %}
+                <div class="tr">
+                    {% for j in range(col_count) %}
+                    {% set idx = i + j %}
+                    {% if idx < group.list|length %}
+                    {% set help = group.list[idx] %}
+                    <div class="td">
+                        <span class="help-icon" style="{{ help.css }}"></span>
+                        <strong class="help-title">{{ help.title }}</strong>
+                        <span class="help-desc">{{ help.desc }}</span>
+                    </div>
+                    {% else %}
+                    <div class="td"></div>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</body>
+</html>
+

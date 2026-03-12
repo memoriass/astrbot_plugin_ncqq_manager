@@ -1,0 +1,26 @@
+{
+  "api_url": {
+    "type": "string",
+    "description": "API地址",
+    "hint": "ncqq-manager服务器地址",
+    "default": "http://localhost:8000"
+  },
+  "api_key": {
+    "type": "string",
+    "description": "API密钥",
+    "hint": "ncqq-manager的API密钥",
+    "default": ""
+  },
+  "timeout": {
+    "type": "int",
+    "description": "请求超时时间",
+    "hint": "API请求超时时间(秒)",
+    "default": 10
+  },
+  "admin_only": {
+    "type": "bool",
+    "description": "仅管理员可用",
+    "hint": "是否仅允许管理员使用",
+    "default": true
+  }
+}

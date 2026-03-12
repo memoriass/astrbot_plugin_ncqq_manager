@@ -1,0 +1,4 @@
+aiohttp>=3.9.0
+pydantic>=2.0.0
+html2image>=2.0.4
+
