@@ -1,0 +1,7 @@
+name: ncqq_manager
+display_name: NapCatQQ Manager
+author: memoriass
+desc: NapCatQQ 容器控制与后端路由插件，支持实例管理、登录状态检查、配置读写等功能
+version: 2.0.0
+repo: https://github.com/memoriass/astrbot_plugin_ncqq_manager
+
