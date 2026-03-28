@@ -19,8 +19,7 @@ class BackendToolsMixin:
             instance_name (string): 要绑定给目标用户的 ncqq 实例名。
             nickname (string): 可选昵称。若能从上下文确定目标用户称呼，可一并记录。
         """
-        role = await self.context.get_user_role(event.get_sender_id())
-        if role not in ["admin", "owner"]:
+        if not event.is_admin():
             yield event.plain_result("权限不足。仅限管理员执行分配操作。")
             return
 
@@ -64,8 +63,7 @@ class BackendToolsMixin:
             qq_id (string): 要设置昵称的 QQ 号。
             nickname (string): 要保存的昵称。
         """
-        role = await self.context.get_user_role(event.get_sender_id())
-        if role not in ["admin", "owner"]:
+        if not event.is_admin():
             yield event.plain_result("权限不足。仅限管理员修改昵称。")
             return
         mapping = await self.get_user_mapping()
@@ -97,8 +95,7 @@ class BackendToolsMixin:
             url (string): 当 action=add 时必填的后端 WebSocket 地址。
             token (string): 可选鉴权 token。
         """
-        role = await self.context.get_user_role(event.get_sender_id())
-        if role not in ["admin", "owner"]:
+        if not event.is_admin():
             yield event.plain_result("权限不足。仅限管理员管理后端配置。")
             return
 
@@ -152,8 +149,7 @@ class BackendToolsMixin:
             backend_alias (string): 雷达端点库中的后端别名关键字，如 'gscore'、'astrbot'。
             instance_keyword (string): 可选实例关键字。目标用户有多个实例时应提供，用于唯一定位实例。
         """
-        role = await self.context.get_user_role(event.get_sender_id())
-        if role not in ["admin", "owner"]:
+        if not event.is_admin():
             yield event.plain_result("权限不足。仅限管理员执行运维路由对接。")
             return
 

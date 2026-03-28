@@ -21,8 +21,7 @@ class InstanceToolsMixin:
         不适用于执行启停、删除、二维码获取、配置写入。
         """
         sender_id = str(event.get_sender_id())
-        role = await self.context.get_user_role(sender_id)
-        is_admin = role in ["admin", "owner"]
+        is_admin = event.is_admin()
 
         mapping = await self.get_user_mapping()
         allowed = mapping.get(sender_id, {}).get("instances", [])
@@ -55,8 +54,7 @@ class InstanceToolsMixin:
             action (string): 管理动作。只应为 start、stop、restart、pause、unpause、kill、delete 之一。pause/unpause 暂停/恢复容器进程；kill 强制终止；delete 销毁容器。
         """
         sender_id = str(event.get_sender_id())
-        role = await self.context.get_user_role(sender_id)
-        is_admin = role in ["admin", "owner"]
+        is_admin = event.is_admin()
 
         if not is_admin:
             if action == "delete":
@@ -83,8 +81,7 @@ class InstanceToolsMixin:
             instance_name (string): 目标 ncqq 实例名。可为空；当消息里包含 @目标用户 且可唯一定位实例时允许省略。
         """
         sender_id = str(event.get_sender_id())
-        role = await self.context.get_user_role(sender_id)
-        is_admin = role in ["admin", "owner"]
+        is_admin = event.is_admin()
 
         target_user_id = self.get_first_at_user_id(event)
         if target_user_id:
@@ -174,7 +171,7 @@ class InstanceToolsMixin:
             if isinstance(item, str):
                 yield event.plain_result(item)
             else:
-                yield event.make_result().message(item)
+                yield event.chain_result([item])
 
     @llm_tool(name="check_ncqq_login_status")
     async def check_login_status(self, event: AstrMessageEvent, instance_name: str):
@@ -187,8 +184,7 @@ class InstanceToolsMixin:
             instance_name (string): 要检查登录状态的 ncqq 实例名。
         """
         sender_id = str(event.get_sender_id())
-        role = await self.context.get_user_role(sender_id)
-        is_admin = role in ["admin", "owner"]
+        is_admin = event.is_admin()
 
         if not is_admin:
             allowed = await self.get_allowed_instances(sender_id)
@@ -224,8 +220,7 @@ class InstanceToolsMixin:
             instance_name (string): 要查看监控信息的 ncqq 实例名。
             fetch_logs (boolean): 为 true 时返回尾部日志；为 false 时返回监控摘要。
         """
-        role = await self.context.get_user_role(event.get_sender_id())
-        if role not in ["admin", "owner"]:
+        if not event.is_admin():
             yield event.plain_result("权限不足。仅限管理员执行性能监测日志。")
             return
 
@@ -242,8 +237,7 @@ class InstanceToolsMixin:
         Args:
             instance_name (string): 要创建的 ncqq 实例名。
         """
-        role = await self.context.get_user_role(event.get_sender_id())
-        if role not in ["admin", "owner"]:
+        if not event.is_admin():
             yield event.plain_result("权限拦截。")
             return
 
@@ -257,8 +251,7 @@ class InstanceToolsMixin:
         适用于管理员查询宿主机中的镜像、容器等基础资产清单。
         不适用于具体实例状态、二维码、后端接入。
         """
-        role = await self.context.get_user_role(event.get_sender_id())
-        if role not in ["admin", "owner"]:
+        if not event.is_admin():
             yield event.plain_result("权限拦截。")
             return
 
@@ -281,8 +274,7 @@ class InstanceToolsMixin:
             instance_name (string): 要读取配置的 ncqq 实例名。
             file_name (string): 容器内要读取的文件名。默认值为 onebot11_uin.json。
         """
-        role = await self.context.get_user_role(event.get_sender_id())
-        if role not in ["admin", "owner"]:
+        if not event.is_admin():
             yield event.plain_result("权限拦截。")
             return
 
@@ -307,8 +299,7 @@ class InstanceToolsMixin:
             file_name (string): 容器内要写入的目标文件名。
             file_content (string): 要完整写入的文件内容，应为最终内容而不是增量片段。
         """
-        role = await self.context.get_user_role(event.get_sender_id())
-        if role not in ["admin", "owner"]:
+        if not event.is_admin():
             yield event.plain_result("权限拦截。")
             return
 
@@ -331,8 +322,7 @@ class InstanceToolsMixin:
             instance_name (string): 要查看文件目录的 ncqq 实例名。
             path (string): 相对于实例数据根目录的路径，留空表示根目录。例如 'config' 或 'qq_data'。
         """
-        role = await self.context.get_user_role(event.get_sender_id())
-        if role not in ["admin", "owner"]:
+        if not event.is_admin():
             yield event.plain_result("权限拦截。")
             return
 

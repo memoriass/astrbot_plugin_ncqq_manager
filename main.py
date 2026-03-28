@@ -28,7 +28,9 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin):
         plugin file path. Methods defined in Mixin sub-files have a different
         __module__, so they are skipped. We manually bind them here.
         """
-        plugin_pkg = __name__.rsplit(".", 1)[0]  # data.plugins.astrbot_plugin_ncqq_manager
+        plugin_pkg = __name__.rsplit(".", 1)[
+            0
+        ]  # data.plugins.astrbot_plugin_ncqq_manager
         for func_tool in llm_tools.func_list:
             h = func_tool.handler
             if (
