@@ -5,6 +5,7 @@ from astrbot.api.all import *
 from astrbot.core.message.components import At
 from astrbot.core.star.star_tools import StarTools
 
+from .scripts.api import NCQQClient
 from .scripts.tools_backend import BackendToolsMixin
 from .scripts.tools_instance import InstanceToolsMixin
 
