@@ -27,50 +27,32 @@ async def do_instance_action(
         return f"操作执行失败，原因: {e}"
 
 
-async def do_inject_backend(
-    client: NCQQClient, instance_name: str, backend_name: str, url: str
+async def do_inject_by_alias(
+    client: NCQQClient,
+    alias: str,
+    target: str,
+    container_name: str = "",
+    conn_id: str = "",
+    uin: str = "default",
 ) -> str:
-    try:
-        bs_conns = {}
-        try:
-            bs_conns = await client.make_request("GET", "/api/botshepherd/connections")
-        except Exception:
-            pass
+    """通过雷达端点别名执行注入。
 
-        if instance_name in bs_conns:
-            conn_data = bs_conns[instance_name]
-            conn_data["target_endpoints"] = [url]
-            await client.make_request(
-                "PUT", f"/api/botshepherd/connections/{instance_name}", json=conn_data
-            )
-            return f"🌟 [智能注入引擎] 检测到实例 {instance_name} 正处于 BotShepherd(BS) 集群中间件接管状态！已成功通过 BS API 将 target_endpoints 全局覆写为目标端口 [{backend_name}: {url}]。流量已动态切分生效。"
+    target='bs': 将别名对应端点追加到指定 BS connection 的 target_endpoints（热重载立即生效）。
+    target='nc': 将别名对应端点注入指定容器的 websocketClients（需重载 NapCat 配置生效）。
+    """
+    try:
+        payload: dict = {"alias": alias, "target": target, "uin": uin}
+        if target == "bs":
+            payload["conn_id"] = conn_id or container_name
         else:
-            payload = {
-                "uin": "default",
-                "network": {
-                    "websocketClients": [
-                        {
-                            "name": backend_name,
-                            "enable": True,
-                            "url": url,
-                            "reportSelfMessage": False,
-                            "messagePostFormat": "array",
-                            "token": "",
-                            "debug": False,
-                            "heartInterval": 30000,
-                            "reconnectInterval": 30000,
-                        }
-                    ]
-                },
-            }
-            await client.make_request(
-                "POST",
-                f"/api/containers/{instance_name}/inject-network-config",
-                json=payload,
-            )
-            await client.make_request(
-                "POST", f"/api/containers/{instance_name}/action?action=restart"
-            )
-            return f"🔌 [智能注入引擎] 检测到实例 {instance_name} 处于原生 NapCat 直通状态！已向其底层配置注入 WS 直连节点 [{backend_name}: {url}]，并发起容器重启请求使其生效。"
+            payload["container_name"] = container_name
+        res = await client.make_request(
+            "POST", "/api/botshepherd/radar/inject-by-alias", json=payload
+        )
+        status = res.get("status", "unknown") if isinstance(res, dict) else "unknown"
+        msg = res.get("message", "") if isinstance(res, dict) else str(res)
+        if status == "ok":
+            return f"注入成功。别名={alias} target={target} {'conn_id=' + (conn_id or container_name) if target == 'bs' else 'container=' + container_name}  {msg}".strip()
+        return f"注入返回异常: {res}"
     except Exception as e:
-        return f"动态环境嗅探与注入失败: {e}"
+        return f"注入失败: {e}"

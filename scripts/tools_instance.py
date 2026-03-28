@@ -9,7 +9,7 @@ from .interaction import (
     do_get_qrcode,
     is_qrcode_available_status,
 )
-from .monitoring import do_get_monitor, do_list_assets, do_list_instances
+from .monitoring import do_get_monitor, do_list_assets, do_list_files, do_list_instances
 
 
 class InstanceToolsMixin:
@@ -34,9 +34,12 @@ class InstanceToolsMixin:
             for qq, data in mapping.items()
             if data.get("nickname")
         }
-        context_hint = f"\n[辅助字典：以下为 QQ 号昵称对照表 {json.dumps(nicknames_dict, ensure_ascii=False)}，请将回复格式中的数字转换为自然昵称。]\n"
+        # 昵称对照信息作为辅助前缀传给 LLM，格式简洁不暴露提示词标签
+        prefix = ""
+        if nicknames_dict:
+            prefix = f"[昵称对照: {json.dumps(nicknames_dict, ensure_ascii=False)}]\n"
 
-        yield event.plain_result(context_hint + msg)
+        yield event.plain_result(prefix + msg)
 
     @llm_tool(name="ncqq_instance_action")
     async def instance_action(
@@ -44,12 +47,12 @@ class InstanceToolsMixin:
     ):
         """执行 ncqq 实例的基础管理动作。
 
-        仅在用户明确表达 start、stop、restart、delete 这类动作意图时调用。
+        仅在用户明确表达 start、stop、restart、pause、unpause、kill、delete 这类动作意图时调用。
         不要把查看状态、获取二维码、查询配置误判为实例动作。
 
         Args:
             instance_name (string): 要操作的 ncqq 实例名，必须是明确的实例标识，不是用户昵称。
-            action (string): 管理动作。只应为 start、stop、restart、delete 之一。
+            action (string): 管理动作。只应为 start、stop、restart、pause、unpause、kill、delete 之一。pause/unpause 暂停/恢复容器进程；kill 强制终止；delete 销毁容器。
         """
         sender_id = str(event.get_sender_id())
         role = await self.context.get_user_role(sender_id)
@@ -125,9 +128,10 @@ class InstanceToolsMixin:
                 status_payload = await do_check_login_status(self.client, inst)
                 available, reason = is_qrcode_available_status(status_payload)
                 if available:
-                    eligible_instances.append(
-                        (inst, status_payload.get("status", "unknown"), reason)
+                    login_label = (
+                        "离线/待登录" if not status_payload.get("logged_in") else "在线"
                     )
+                    eligible_instances.append((inst, login_label, reason))
             if len(eligible_instances) == 1:
                 target_instance_name = eligible_instances[0][0]
             elif len(eligible_instances) > 1:
@@ -309,4 +313,28 @@ class InstanceToolsMixin:
             return
 
         msg = await do_write_config(self.client, instance_name, file_name, file_content)
+        yield event.plain_result(msg)
+
+    @llm_tool(name="list_ncqq_files")
+    async def list_files(
+        self,
+        event: AstrMessageEvent,
+        instance_name: str,
+        path: str = "",
+    ):
+        """列出 ncqq 实例数据目录下的文件和子目录。
+
+        适用于管理员排查文件、查看配置目录结构、核对数据文件。
+        不适用于读取文件内容（应使用 read_ncqq_config）或执行实例动作。
+
+        Args:
+            instance_name (string): 要查看文件目录的 ncqq 实例名。
+            path (string): 相对于实例数据根目录的路径，留空表示根目录。例如 'config' 或 'qq_data'。
+        """
+        role = await self.context.get_user_role(event.get_sender_id())
+        if role not in ["admin", "owner"]:
+            yield event.plain_result("权限拦截。")
+            return
+
+        msg = await do_list_files(self.client, instance_name, path)
         yield event.plain_result(msg)

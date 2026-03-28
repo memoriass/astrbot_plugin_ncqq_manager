@@ -1,6 +1,7 @@
 from astrbot.api.all import AstrMessageEvent, At, llm_tool
 
-from .actions import do_inject_backend
+from .actions import do_inject_by_alias
+from .monitoring import do_get_radar_endpoints, do_save_radar_endpoints
 
 
 class BackendToolsMixin:
@@ -81,64 +82,79 @@ class BackendToolsMixin:
         self,
         event: AstrMessageEvent,
         action: str,
-        name: str,
+        alias: str,
         url: str = "",
-        aliases: str = "",
+        token: str = "",
     ):
-        """管理 ncqq 管理器中的后端模板注册表。
+        """管理 ncqq 管理器中的后端雷达端点库（服务端存储）。
 
-        仅适用于管理员新增或删除后端模板。
+        仅适用于管理员新增或删除后端端点模板。
         不适用于把实例接入后端；真正执行接入应调用 inject_backend_to_instance。
 
         Args:
             action (string): 管理动作，只应为 add 或 remove。
-            name (string): 后端模板名称。
-            url (string): 当 action=add 时必填的后端地址。
-            aliases (string): 可选别名列表，使用英文逗号分隔。
+            alias (string): 后端端点别名，用于唯一标识该端点。
+            url (string): 当 action=add 时必填的后端 WebSocket 地址。
+            token (string): 可选鉴权 token。
         """
         role = await self.context.get_user_role(event.get_sender_id())
         if role not in ["admin", "owner"]:
             yield event.plain_result("权限不足。仅限管理员管理后端配置。")
             return
 
-        registry = await self.get_backends_registry()
+        endpoints = await do_get_radar_endpoints(self.client)
+
         if action == "add":
             if not url:
                 yield event.plain_result("添加失败。缺乏 url 参数。")
                 return
-            registry[name] = {
-                "url": url,
-                "aliases": [a.strip() for a in aliases.split(",") if a.strip()]
-                if aliases
-                else [],
-            }
-            await self.save_backends_registry(registry)
-            yield event.plain_result(f"配置保存成功。模板: {name}。")
-        elif action == "remove":
-            if name in registry:
-                del registry[name]
-                await self.save_backends_registry(registry)
-                yield event.plain_result(f"配置删除成功。模板: {name}。")
+            # 已存在则更新，否则追加
+            existing = next((e for e in endpoints if e.get("alias") == alias), None)
+            if existing:
+                existing["url"] = url
+                existing["token"] = token
             else:
-                yield event.plain_result("配置不存在，无法删除。")
+                endpoints.append({"alias": alias, "url": url, "token": token})
+            result = await do_save_radar_endpoints(self.client, endpoints)
+            yield event.plain_result(
+                f"端点已添加/更新: alias={alias} url={url}  {result}"
+            )
+
+        elif action == "remove":
+            new_endpoints = [e for e in endpoints if e.get("alias") != alias]
+            if len(new_endpoints) == len(endpoints):
+                yield event.plain_result(f"未找到别名为 '{alias}' 的端点，无法删除。")
+                return
+            result = await do_save_radar_endpoints(self.client, new_endpoints)
+            yield event.plain_result(f"端点已删除: alias={alias}  {result}")
+
+        else:
+            yield event.plain_result(
+                f"不支持的 action='{action}'，仅支持 add 或 remove。"
+            )
 
     @llm_tool(name="inject_backend_to_instance")
     async def inject_backend(
-        self, event: AstrMessageEvent, backend_keyword: str, instance_keyword: str = ""
+        self,
+        event: AstrMessageEvent,
+        backend_alias: str,
+        target: str = "nc",
+        instance_keyword: str = "",
     ):
-        """将消息中被 @ 用户绑定的 ncqq 实例接入指定后端模板。
+        """将消息中被 @ 用户绑定的 ncqq 实例接入指定后端端点。
 
         适用于管理员执行接入、对接、入网、挂后端等操作。
         必须依赖消息中的真实 @ 目标用户；若用户拥有多个实例且无法唯一定位，不要猜测，必须要求补充实例名。
         不适用于后端模板的新增删除，也不适用于实例绑定。
 
         Args:
-            backend_keyword (string): 后端模板名称或别名关键字。
+            backend_alias (string): 雷达端点库中的别名关键字，用于定位要注入的后端端点。
+            target (string): 注入目标类型。'nc' 表示直接注入 NapCat websocketClients 配置（需重载生效）；'bs' 表示注入到 BotShepherd connection 的 target_endpoints（热重载立即生效）。默认为 'nc'。
             instance_keyword (string): 可选实例关键字。目标用户有多个实例时应提供，用于唯一定位实例。
         """
         role = await self.context.get_user_role(event.get_sender_id())
         if role not in ["admin", "owner"]:
-            yield event.plain_result("权限不足。仅限管理员执运维路由对接。")
+            yield event.plain_result("权限不足。仅限管理员执行运维路由对接。")
             return
 
         at_users = [
@@ -177,35 +193,31 @@ class BackendToolsMixin:
                 )
                 return
 
-        registry = await self.get_backends_registry()
-        matched_backend = None
-        for b_name, b_info in registry.items():
-            if (
-                backend_keyword.lower() in b_name.lower()
-                or backend_keyword.lower() == b_name.lower()
-            ):
-                matched_backend = (b_name, b_info)
-                break
-            for alias in b_info.get("aliases", []):
-                if (
-                    backend_keyword.lower() in alias.lower()
-                    or backend_keyword.lower() == alias.lower()
-                ):
-                    matched_backend = (b_name, b_info)
-                    break
-
-        if not matched_backend:
+        # 从服务端雷达端点库中按别名匹配端点
+        endpoints = await do_get_radar_endpoints(self.client)
+        matched = next(
+            (
+                e
+                for e in endpoints
+                if backend_alias.lower() in e.get("alias", "").lower()
+            ),
+            None,
+        )
+        if not matched:
             yield event.plain_result(
-                f"注册表中不存在与 '{backend_keyword}' 关联的后端模板。"
+                f"雷达端点库中不存在与 '{backend_alias}' 关联的端点，请先通过 manage_ncqq_backends 添加。"
             )
             return
 
-        b_name, b_info = matched_backend
-
-        msg = await do_inject_backend(
-            self.client, target_instance_name, b_name, b_info["url"]
+        alias = matched["alias"]
+        msg = await do_inject_by_alias(
+            self.client,
+            alias=alias,
+            target=target,
+            container_name=target_instance_name,
+            conn_id=target_instance_name,
         )
 
         yield event.plain_result(
-            f"对接动作流完成反馈:\n目标 QQ: {target_uid}\n选配实例: {target_instance_name}\n应用模板: {b_name}\n结果: {msg}"
+            f"注入完成:\n目标 QQ: {target_uid}\n选配实例: {target_instance_name}\n端点别名: {alias}\ntarget: {target}\n结果: {msg}"
         )

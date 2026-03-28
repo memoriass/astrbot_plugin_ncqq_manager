@@ -1,6 +1,3 @@
-import json
-import os
-
 from astrbot.api.all import *
 from astrbot.core.message.components import At
 from astrbot.core.star.star_tools import StarTools
@@ -18,8 +15,8 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin):
         super().__init__(context)
         self.config = config
         self.client = NCQQClient(self.config)
-        plugin_data_dir = StarTools.get_data_dir("astrbot_plugin_ncqq_manager")
-        self.backends_file = os.path.join(plugin_data_dir, "backends.json")
+        # Keep data dir for future use (user mapping, etc.)
+        StarTools.get_data_dir("astrbot_plugin_ncqq_manager")
 
     async def get_user_mapping(self) -> dict:
         """从原生 SQLite KV 数据库读取用户映射"""
@@ -28,19 +25,6 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin):
     async def save_user_mapping(self, mapping_dict: dict):
         """存入原生 SQLite KV 数据库"""
         await self.put_kv_data("user_mapping", mapping_dict)
-
-    async def get_backends_registry(self) -> dict:
-        """从本地 JSON 文件读取后端配置以便用户手动直接修改"""
-        try:
-            with open(self.backends_file, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-
-    async def save_backends_registry(self, registry: dict):
-        """将后端的最新模板列表存回 JSON 文件"""
-        with open(self.backends_file, "w", encoding="utf-8") as f:
-            json.dump(registry, f, ensure_ascii=False, indent=2)
 
     async def get_allowed_instances(self, sender_id: str) -> list:
         mapping = await self.get_user_mapping()
