@@ -138,18 +138,18 @@ class BackendToolsMixin:
         self,
         event: AstrMessageEvent,
         backend_alias: str,
-        target: str = "nc",
         instance_keyword: str = "",
     ):
-        """将消息中被 @ 用户绑定的 ncqq 实例接入指定后端端点。
+        """将消息中被 @ 用户绑定的 ncqq 实例接入指定 BotShepherd 后端端点。
 
-        适用于管理员执行接入、对接、入网、挂后端等操作。
+        后端已由云端统一集成，本工具只负责将雷达端点库中的指定别名注入到目标实例的
+        BotShepherd connection（热重载立即生效，无需重启容器）。
+        适用场景：@某用户，给他的实例接入 gscore / astrbot 等后端别名。
         必须依赖消息中的真实 @ 目标用户；若用户拥有多个实例且无法唯一定位，不要猜测，必须要求补充实例名。
-        不适用于后端模板的新增删除，也不适用于实例绑定。
+        不适用于后端端点的新增删除，也不适用于实例绑定。
 
         Args:
-            backend_alias (string): 雷达端点库中的别名关键字，用于定位要注入的后端端点。
-            target (string): 注入目标类型。'nc' 表示直接注入 NapCat websocketClients 配置（需重载生效）；'bs' 表示注入到 BotShepherd connection 的 target_endpoints（热重载立即生效）。默认为 'nc'。
+            backend_alias (string): 雷达端点库中的后端别名关键字，如 'gscore'、'astrbot'。
             instance_keyword (string): 可选实例关键字。目标用户有多个实例时应提供，用于唯一定位实例。
         """
         role = await self.context.get_user_role(event.get_sender_id())
@@ -210,14 +210,14 @@ class BackendToolsMixin:
             return
 
         alias = matched["alias"]
+        # 后端统一由 BotShepherd 集成，固定走 target="bs"，conn_id = 实例名
         msg = await do_inject_by_alias(
             self.client,
             alias=alias,
-            target=target,
-            container_name=target_instance_name,
+            target="bs",
             conn_id=target_instance_name,
         )
 
         yield event.plain_result(
-            f"注入完成:\n目标 QQ: {target_uid}\n选配实例: {target_instance_name}\n端点别名: {alias}\ntarget: {target}\n结果: {msg}"
+            f"注入完成:\n目标 QQ: {target_uid}\n实例: {target_instance_name}\n后端别名: {alias}\n结果: {msg}"
         )
