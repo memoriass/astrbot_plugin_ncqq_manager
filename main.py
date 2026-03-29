@@ -3,6 +3,7 @@ import pathlib
 import re
 
 from astrbot.api.all import *
+from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.core.message.components import At, Reply
 from astrbot.core.provider.register import llm_tools
 from astrbot.core.star.star_tools import StarTools
@@ -109,7 +110,7 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsM
     # Reply-based approval shortcut listener
     # ------------------------------------------------------------------
 
-    @filter.event_message_type(EventMessageType.GROUP_MESSAGE)
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     async def on_group_message_reply(self, event: AstrMessageEvent):
         """Detect AstrBot admin quoting an approval notice and auto-approve it."""
         # event.role may not be set for non-wake messages (waking_check is skipped),
