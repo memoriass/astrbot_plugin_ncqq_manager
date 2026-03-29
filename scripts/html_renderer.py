@@ -8,15 +8,110 @@ from __future__ import annotations
 
 import base64
 import datetime
+import io
 import logging
 import os
 import pathlib
+import random
+import struct
 import tempfile
 from typing import Union
 
 logger = logging.getLogger(__name__)
 
 _TEMPLATE_PATH = pathlib.Path(__file__).parent.parent / "templates" / "instances.html"
+
+# 模板文件缓存：避免每次渲染都读磁盘
+_template_cache: str | None = None
+_template_mtime: float = 0.0
+
+# 壁纸目录：运行时由 main.py 通过 set_bg_dir() 设置为 plugin data 路径
+_BG_DIR: pathlib.Path | None = None
+
+# 支持的壁纸扩展名
+_BG_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+
+# 壁纸缓存：基于目录 mtime 自动失效，每条记录为 (data_uri, pixel_width)
+_wallpaper_cache: list[tuple[str, int]] = []
+_wallpaper_dir_mtime: float = 0.0
+
+# 无壁纸时的默认面板宽度
+_DEFAULT_BODY_W = 560
+
+# Playwright 浏览器复用：全局单例，避免每次截图都 launch/close
+_browser_instance = None
+_playwright_instance = None
+
+
+def set_bg_dir(path: pathlib.Path) -> None:
+    """由 main.py 初始化时调用，设置壁纸存储目录（plugin data/backgrounds）。"""
+    global _BG_DIR, _wallpaper_cache, _wallpaper_dir_mtime
+    _BG_DIR = path
+    # 切换目录时清除缓存
+    _wallpaper_cache = []
+    _wallpaper_dir_mtime = 0.0
+
+
+def _image_width(data: bytes) -> int:
+    """从图片二进制数据中快速读取像素宽度（支持 JPEG/PNG/WebP）。"""
+    try:
+        if data[:8] == b'\x89PNG\r\n\x1a\n':
+            # PNG: IHDR chunk, width at offset 16 (4 bytes big-endian)
+            return struct.unpack('>I', data[16:20])[0]
+        if data[:2] == b'\xff\xd8':
+            # JPEG: 扫描 SOFn 标记
+            i = 2
+            while i < len(data) - 9:
+                if data[i] != 0xFF:
+                    break
+                marker = data[i + 1]
+                if marker in (0xC0, 0xC1, 0xC2):
+                    return struct.unpack('>H', data[i + 7:i + 9])[0]
+                length = struct.unpack('>H', data[i + 2:i + 4])[0]
+                i += 2 + length
+        if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+            # WebP VP8: width at offset 26 (little-endian 14-bit)
+            if data[12:16] == b'VP8 ':
+                return (struct.unpack('<H', data[26:28])[0]) & 0x3FFF
+            # WebP VP8L
+            if data[12:17] == b'VP8L\x00'[:4]:
+                bits = struct.unpack('<I', data[21:25])[0]
+                return (bits & 0x3FFF) + 1
+    except Exception:
+        pass
+    return _DEFAULT_BODY_W  # 无法解析时回退默认宽度
+
+
+def _load_wallpapers() -> list[tuple[str, int]]:
+    """扫描 backgrounds/ 目录，返回 [(data_uri, pixel_width), ...] 列表。
+
+    使用 mtime 缓存：目录修改时间不变时直接返回上次结果。
+    """
+    global _wallpaper_cache, _wallpaper_dir_mtime
+    if _BG_DIR is None or not _BG_DIR.is_dir():
+        return []
+    try:
+        current_mtime = _BG_DIR.stat().st_mtime
+    except OSError:
+        return []
+    if _wallpaper_cache and current_mtime == _wallpaper_dir_mtime:
+        return _wallpaper_cache
+    entries: list[tuple[str, int]] = []
+    for f in _BG_DIR.iterdir():
+        if f.suffix.lower() not in _BG_EXTS:
+            continue
+        try:
+            raw = f.read_bytes()
+            mime = "image/jpeg" if f.suffix.lower() in {".jpg", ".jpeg"} else f"image/{f.suffix.lower().lstrip('.')}"
+            uri = f"data:{mime};base64,{base64.b64encode(raw).decode()}"
+            width = _image_width(raw)
+            entries.append((uri, width))
+        except Exception as e:
+            logger.warning("wallpaper load failed: %s — %s", f.name, e)
+    _wallpaper_cache = entries
+    _wallpaper_dir_mtime = current_mtime
+    logger.info("wallpaper cache refreshed: %d images loaded", len(entries))
+    return entries
 
 # ------------------------------------------------------------------ #
 #  Data helpers                                                        #
@@ -72,79 +167,145 @@ def _build_card(c: dict, rank: int) -> str:
     # 管理器直接提供的头像（base64 data-URI 或 https URL 均可）
     bot_avatar  = c.get("bot_avatar", "")
 
-    avatars = ["🤖", "🐾", "🌸", "⚡", "🎮", "🔥", "🌙", "⭐"]
-    fallback_emoji = avatars[(rank - 1) % len(avatars)]
     uin_display = uin or "—"
 
     if bot_avatar:
-        # 有头像：img 铺满，onerror 降级到 emoji
-        bg_inner = (
-            f'<img src="{bot_avatar}" alt="avatar" '
-            f'onerror="this.style.display=\'none\';'
-            f'this.parentNode.querySelector(\'.card-bg-emoji\').style.display=\'flex\'">'
-            f'<span class="card-bg-emoji" style="display:none">{fallback_emoji}</span>'
-        )
-        no_avatar_hint = ""
+        # 有头像：img 铺满全卡，onerror 时隐藏图片（灰色底透出）
+        bg_inner = f'<img src="{bot_avatar}" alt="avatar" onerror="this.style.display=\'none\'">'
+        bg_class = "card-bg"
     else:
-        # 无头像：emoji 占位 + 提示用户检查管理器
-        bg_inner = f'<span class="card-bg-emoji">{fallback_emoji}</span>'
-        no_avatar_hint = (
-            '<div class="no-avatar-hint">'
-            '⚠️ 管理器未返回头像数据，请检查 ncqq 管理器版本或配置。'
-            '</div>'
-        )
+        # 无头像：纯灰色背景，简洁不突兀
+        bg_inner = ""
+        bg_class = "card-bg solid-grey"
 
     return (
         f'<div class="card">'
-        f'<div class="card-bg">{bg_inner}</div>'
+        f'<div class="{bg_class}">{bg_inner}</div>'
         f'<div class="card-hero">'
         f'<span class="live-badge {state}">{badge_text}</span>'
         f'</div>'
         f'<div class="card-body">'
         f'<div class="inst-name">{name}</div>'
         f'<div class="inst-uin">QQ: <span>{uin_display}</span></div>'
-        + (f'{no_avatar_hint}' if no_avatar_hint else '')
-        + f'<hr class="divider">'
         f'<div class="meta-row">'
-        f'<div class="meta-item"><span class="emoji">🔑</span>'
-        f'<span class="val">{login_info}</span></div>'
-        f'<div class="meta-item"><span class="emoji">⏱</span>'
-        f'<span class="val hi">{heartbeat}</span></div>'
+        f'<div class="meta-item"><span class="val">{login_info}</span></div>'
+        f'<div class="meta-item"><span class="val">{heartbeat}</span></div>'
         f'</div>'
         f'</div>'
         f'</div>'
     )
 
 
-def _render_html(containers: list[dict]) -> str:
-    """Fill template placeholders and return final HTML string."""
-    template = _TEMPLATE_PATH.read_text(encoding="utf-8")
+def _get_template() -> str:
+    """读取模板文件，使用 mtime 缓存避免重复磁盘 IO。"""
+    global _template_cache, _template_mtime
+    try:
+        current_mtime = _TEMPLATE_PATH.stat().st_mtime
+    except OSError:
+        if _template_cache:
+            return _template_cache
+        raise
+    if _template_cache and current_mtime == _template_mtime:
+        return _template_cache
+    _template_cache = _TEMPLATE_PATH.read_text(encoding="utf-8")
+    _template_mtime = current_mtime
+    return _template_cache
+
+
+def _render_html(containers: list[dict]) -> tuple[str, int]:
+    """Fill template placeholders and return (final HTML, body_width).
+
+    body 宽度由壁纸图片的实际像素宽度决定；无壁纸时回退 _DEFAULT_BODY_W。
+    卡片使用 flex: 1 1 240px 自然按宽度弹性填充，一行放几张由壁纸宽度自动决定。
+    """
+    template = _get_template()
     total = len(containers)
     online = sum(1 for c in containers if c.get("bot_online"))
     offline = total - online
-    cards_html = "".join(_build_card(c, i + 1) for i, c in enumerate(containers))
+    # 面板壁纸（随机选一张铺满整个面板背景，同时取其像素宽度作为 body 宽度）
+    wallpapers = _load_wallpapers()
+    if wallpapers:
+        wp_uri, body_width = random.choice(wallpapers)
+        panel_wp = f'<div class="panel-wallpaper"><img src="{wp_uri}" alt=""></div>'
+    else:
+        panel_wp = ""
+        body_width = _DEFAULT_BODY_W
+    cards_html = "".join(
+        _build_card(c, i + 1)
+        for i, c in enumerate(containers)
+    )
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    return (
+    html = (
         template
+        .replace("__BODY_WIDTH__", str(body_width))
+        .replace("__PANEL_WALLPAPER__", panel_wp)
         .replace("__GENERATED_AT__", now_str)
         .replace("__TOTAL__", str(total))
         .replace("__ONLINE__", str(online))
         .replace("__OFFLINE__", str(offline))
         .replace("__CARDS__", cards_html)
     )
+    return html, body_width
 
 
 # ------------------------------------------------------------------ #
-#  Playwright screenshot (optional)                                    #
+#  Playwright screenshot (optional, with browser reuse)                #
 # ------------------------------------------------------------------ #
 
-async def _screenshot_html(html: str) -> bytes | None:
-    """Render HTML to PNG bytes via playwright. Returns None if unavailable."""
+async def _ensure_browser():
+    """获取或创建全局 playwright 浏览器实例（单例复用）。"""
+    global _browser_instance, _playwright_instance
+    if _browser_instance and _browser_instance.is_connected():
+        return _browser_instance
     try:
         from playwright.async_api import async_playwright  # type: ignore
     except ImportError:
         return None
+    try:
+        _playwright_instance = await async_playwright().start()
+        _browser_instance = await _playwright_instance.chromium.launch(
+            args=["--no-sandbox", "--disable-dev-shm-usage"]
+        )
+        logger.info("playwright browser launched (reusable)")
+        return _browser_instance
+    except Exception as e:
+        logger.warning("playwright browser launch failed: %s", e)
+        return None
 
+
+async def cleanup_renderer() -> None:
+    """关闭全局 playwright 浏览器实例。由插件卸载时调用。"""
+    global _browser_instance, _playwright_instance
+    if _browser_instance:
+        try:
+            await _browser_instance.close()
+        except Exception:
+            pass
+        _browser_instance = None
+    if _playwright_instance:
+        try:
+            await _playwright_instance.stop()
+        except Exception:
+            pass
+        _playwright_instance = None
+    logger.info("playwright renderer cleaned up")
+
+
+async def _screenshot_html(html: str, viewport_width: int = 560) -> bytes | None:
+    """Render HTML to PNG bytes via playwright. Returns None if unavailable.
+
+    优化点：
+    - 浏览器实例复用（全局单例），避免每次 launch/close
+    - viewport 宽度根据卡片数动态匹配
+    - 临时文件使用 try/finally 确保清理
+    - 额外等待外部图片（qlogo 头像）加载完成
+    """
+    browser = await _ensure_browser()
+    if browser is None:
+        return None
+
+    tmp_path = None
+    page = None
     try:
         with tempfile.NamedTemporaryFile(
             suffix=".html", mode="w", encoding="utf-8", delete=False
@@ -152,20 +313,37 @@ async def _screenshot_html(html: str) -> bytes | None:
             f.write(html)
             tmp_path = f.name
 
-        async with async_playwright() as pw:
-            browser = await pw.chromium.launch(args=["--no-sandbox"])
-            page = await browser.new_page(viewport={"width": 560, "height": 800})
-            await page.goto(f"file://{tmp_path}")
-            await page.wait_for_load_state("networkidle")
-            content_box = await page.query_selector("body")
-            png = await content_box.screenshot() if content_box else await page.screenshot()
-            await browser.close()
-
-        os.unlink(tmp_path)
+        page = await browser.new_page(viewport={"width": viewport_width, "height": 800})
+        await page.goto(f"file://{tmp_path}")
+        await page.wait_for_load_state("networkidle")
+        # 等待外部头像图片加载完毕（qlogo URL 等）
+        try:
+            await page.wait_for_function(
+                """() => {
+                    const imgs = document.querySelectorAll('img');
+                    return Array.from(imgs).every(img => img.complete);
+                }""",
+                timeout=5000,
+            )
+        except Exception:
+            pass  # 超时不阻塞，降级使用已加载的内容
+        content_box = await page.query_selector("body")
+        png = await content_box.screenshot() if content_box else await page.screenshot()
         return png
     except Exception as e:
         logger.warning("playwright screenshot failed: %s", e)
         return None
+    finally:
+        if page:
+            try:
+                await page.close()
+            except Exception:
+                pass
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 # ------------------------------------------------------------------ #
@@ -203,8 +381,8 @@ async def render_instances(containers: list[dict]) -> Union[str, bytes]:
     """Return PNG bytes (playwright) or plain-text str (fallback)."""
     if not containers:
         return "当前没有任何实例。"
-    html = _render_html(containers)
-    png = await _screenshot_html(html)
+    html, body_width = _render_html(containers)
+    png = await _screenshot_html(html, viewport_width=body_width)
     if png:
         return png
     return _plain_text(containers)

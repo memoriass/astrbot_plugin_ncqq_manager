@@ -1,4 +1,5 @@
 import functools
+import pathlib
 import re
 
 from astrbot.api.all import *
@@ -7,6 +8,7 @@ from astrbot.core.provider.register import llm_tools
 from astrbot.core.star.star_tools import StarTools
 
 from .scripts.api import NCQQClient
+from .scripts.html_renderer import cleanup_renderer, set_bg_dir
 from .scripts.tools_admin import AdminToolsMixin
 from .scripts.tools_backend import BackendToolsMixin
 from .scripts.tools_instance import InstanceToolsMixin
@@ -20,7 +22,11 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsM
         super().__init__(context)
         self.config = config
         self.client = NCQQClient(self.config)
-        StarTools.get_data_dir("astrbot_plugin_ncqq_manager")
+        # plugin data 目录（AstrBot 标准持久化路径）
+        data_dir = pathlib.Path(StarTools.get_data_dir("astrbot_plugin_ncqq_manager"))
+        bg_dir = data_dir / "backgrounds"
+        bg_dir.mkdir(parents=True, exist_ok=True)
+        set_bg_dir(bg_dir)
 
     async def initialize(self):
         """Bind Mixin llm_tool handlers to this instance.
@@ -41,6 +47,10 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsM
             ):
                 func_tool.handler = functools.partial(h, self)
                 func_tool.handler_module_path = __name__
+
+    async def terminate(self):
+        """插件卸载/重载时清理 playwright 浏览器实例。"""
+        await cleanup_renderer()
 
     # ------------------------------------------------------------------
     # User mapping KV helpers

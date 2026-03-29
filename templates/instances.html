@@ -9,7 +9,22 @@
     font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
     background: #0d1117;
     padding: 16px 14px 10px;
-    width: 560px;
+    width: __BODY_WIDTH__px;
+    position: relative;
+  }
+  /* 面板壁纸底层：铺满整个 body，低透明度装饰 */
+  .panel-wallpaper {
+    position: fixed; inset: 0; z-index: 0;
+    pointer-events: none; overflow: hidden;
+  }
+  .panel-wallpaper img {
+    width: 100%; height: 100%;
+    object-fit: cover; object-position: center center;
+    opacity: 0.15; display: block;
+  }
+  /* 所有内容浮于壁纸之上 */
+  .header, .card-grid {
+    position: relative; z-index: 1;
   }
 
   /* ── 顶部标题 ── */
@@ -18,53 +33,59 @@
     margin-bottom: 14px;
   }
   .header-left { display: flex; align-items: center; gap: 8px; }
-  .header-icon { font-size: 22px; }
   .header-title { color: #e6edf3; font-size: 17px; font-weight: 700; }
+  .header-stats {
+    display: flex; align-items: center; gap: 14px;
+  }
+  .header-stat { font-size: 12px; color: #8b949e; }
+  .header-stat span { font-weight: 700; margin-left: 3px; }
+  .header-stat span.c-blue { color: #58a6ff; }
+  .header-stat span.c-green { color: #3fb950; }
+  .header-stat span.c-red { color: #f85149; }
   .header-time  { color: #484f58; font-size: 11px; }
 
-  /* ── 卡片网格（每行2列） ── */
+  /* ── 卡片网格（自适应列宽） ── */
   .card-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    display: flex;
+    flex-wrap: wrap;
     gap: 10px;
     margin-bottom: 10px;
   }
 
-  /* ── 单张卡片 ── */
+  /* ── 单张卡片（固定宽度，不拉伸，一行放几张由壁纸宽度决定） ── */
   .card {
     position: relative;
-    background: transparent;
+    background: #161b22;
     border: 1px solid #30363d;
     border-radius: 12px;
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    flex: 0 0 200px;
   }
 
-  /* 头像图：铺满整张卡片叠底 */
+  /* 头像层：铺满全卡 */
   .card-bg {
     position: absolute; inset: 0;
-    z-index: 0; pointer-events: none;
+    z-index: 1; pointer-events: none;
     overflow: hidden;
   }
   /* 有头像图时：img 铺满全卡 */
   .card-bg img {
     width: 100%; height: 100%;
     object-fit: cover; object-position: center top;
-    opacity: 0.60;
+    opacity: 0.55;
     display: block;
   }
-  /* 无头像时纯色渐变背景 */
-  .card-bg.solid-online  { background: linear-gradient(160deg, #0f3320 0%, #1e5c38 100%); }
-  .card-bg.solid-offline { background: linear-gradient(160deg, #3a0f0f 0%, #5a1e1e 100%); }
-  .card-bg.solid-paused  { background: linear-gradient(160deg, #3a2e00 0%, #5a4800 100%); }
+  /* 无头像时纯灰色底色 */
+  .card-bg.solid-grey { background: #252a30; }
 
   /* 卡片顶部：透明区域，仅撑高度放徽章 */
   .card-hero {
     height: 72px;
     display: flex; align-items: flex-start; justify-content: flex-start;
     padding: 8px 10px;
-    position: relative; z-index: 1;
+    position: relative; z-index: 2;
     background: transparent;
   }
 
@@ -78,85 +99,69 @@
   .live-badge.offline { background: #f85149; color: #fff; }
   .live-badge.paused  { background: #d2a520; color: #0d1117; }
 
-  /* 卡片底部内容区 */
+  /* 卡片底部内容区：底部深色渐变蒙版保证文字可读 */
   .card-body {
     padding: 10px 12px 11px;
     display: flex; flex-direction: column; gap: 5px;
     flex: 1;
-    position: relative; z-index: 1;
+    position: relative; z-index: 2;
+    background: linear-gradient(to top, rgba(0,0,0,0.80) 0%, rgba(0,0,0,0.0) 65%);
   }
 
-  /* 实例名（对应 Akie秋绘） */
+  /* 统一白色字体 + 多层黑色描边阴影（防止白色/浅色头像吞字） */
+  .card-body, .card-body * {
+    color: #ffffff;
+  }
+  .card-body .inst-name,
+  .card-body .inst-uin,
+  .card-body .meta-item {
+    text-shadow:
+      0 0 2px rgba(0,0,0,1),
+      0 0 4px rgba(0,0,0,0.95),
+      0 1px 6px rgba(0,0,0,0.9);
+  }
+
+  /* 实例名 */
   .inst-name {
-    color: #e6edf3; font-size: 14px; font-weight: 700;
+    font-size: 14px; font-weight: 700;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
 
-  /* QQ号（对应 UID: 4176573）——第一栏，突出显示 */
+  /* QQ号 */
   .inst-uin {
-    color: #8b949e; font-size: 12px; font-family: monospace;
+    font-size: 12px; font-family: monospace;
     letter-spacing: 0.3px;
   }
-  .inst-uin span { color: #58a6ff; font-weight: 600; }
 
-  /* 分隔线 */
-  .divider {
-    border: none; border-top: 1px solid #21262d; margin: 2px 0;
-  }
-
-  /* 底部信息行（登录 + 心跳） */
+  /* 底部信息行（登录 + 心跳）两侧对齐 */
   .meta-row {
-    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 2px;
   }
   .meta-item {
     display: flex; align-items: center; gap: 3px;
-    font-size: 11px; color: #8b949e;
+    font-size: 11px;
   }
-  .meta-item .emoji { font-size: 12px; }
-  .meta-item .val   { color: #8b949e; }
-  .meta-item .val.hi { color: #58a6ff; }
-
-  /* 无 QQ 号时的提示条 */
-  .no-avatar-hint {
-    font-size: 10px; color: #d2a520;
-    background: rgba(210,165,32,0.1);
-    border: 1px solid rgba(210,165,32,0.3);
-    border-radius: 4px; padding: 3px 6px;
-    line-height: 1.4;
-  }
-
-  /* ── 底部汇总栏 ── */
-  .footer-bar {
-    margin-top: 4px;
-    background: #161b22; border: 1px solid #30363d;
-    border-radius: 8px; padding: 8px 14px;
-    display: flex; gap: 24px; align-items: center;
-  }
-  .footer-item { font-size: 12px; color: #8b949e; }
-  .footer-item span { color: #3fb950; font-weight: 700; margin-left: 4px; }
-  .footer-item span.blue { color: #58a6ff; }
-  .footer-right { margin-left: auto; font-size: 11px; color: #30363d; }
 </style>
 </head>
 <body>
 
+__PANEL_WALLPAPER__
+
 <div class="header">
   <div class="header-left">
-    <span class="header-icon">🐱</span>
     <span class="header-title">NapCat 实例面板</span>
+    <div class="header-stats">
+      <span class="header-stat">实例<span class="c-blue">__TOTAL__</span></span>
+      <span class="header-stat">在线<span class="c-green">__ONLINE__</span></span>
+      <span class="header-stat">离线<span class="c-red">__OFFLINE__</span></span>
+    </div>
   </div>
   <span class="header-time">__GENERATED_AT__</span>
 </div>
 
 <div class="card-grid">
 __CARDS__
-</div>
-
-<div class="footer-bar">
-  <div class="footer-item">实例数<span class="blue">__TOTAL__</span></div>
-  <div class="footer-item">在线<span>__ONLINE__</span></div>
-  <div class="footer-item">离线<span style="color:#f85149">__OFFLINE__</span></div>
-  <div class="footer-right">NapCatQQ Manager · __GENERATED_AT__</div>
 </div>
 
 </body>
