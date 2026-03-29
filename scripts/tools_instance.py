@@ -62,7 +62,11 @@ class InstanceToolsMixin:
 
     @llm_tool(name="ncqq_instance_action")
     async def instance_action(
-        self, event: AstrMessageEvent, instance_name: str, action: str
+        self,
+        event: AstrMessageEvent,
+        instance_name: str,
+        action: str,
+        delete_data: bool = False,
     ):
         """执行 ncqq 实例的基础管理动作。
 
@@ -72,6 +76,7 @@ class InstanceToolsMixin:
         Args:
             instance_name (string): 要操作的 ncqq 实例名，必须是明确的实例标识，不是用户昵称。
             action (string): 管理动作。只应为 start、stop、restart、pause、unpause、kill、delete 之一。pause/unpause 暂停/恢复容器进程；kill 强制终止；delete 销毁容器。
+            delete_data (boolean): 仅在 action 为 delete 时有效。为 true 时同时删除该实例在管理器上的本地数据目录（QQ数据、配置、插件、缓存），不可恢复；为 false 时仅移除容器但保留数据。请根据用户意图判断：用户说"彻底删除""清除所有数据""删干净"等表达时设为 true；仅说"删除实例""移除容器"时设为 false。默认为 false。
         """
         sender_id = str(event.get_sender_id())
         is_admin = event.is_admin()
@@ -90,10 +95,13 @@ class InstanceToolsMixin:
                 approval_id = await create_approval(
                     self,
                     action="delete",
-                    params={"instance_name": instance_name},
+                    params={
+                        "instance_name": instance_name,
+                        "delete_data": delete_data,
+                    },
                     requester_qq=sender_id,
                     group_id=str(event.get_group_id() or ""),
-                    description=f"销毁实例 {instance_name}（申请者: {sender_id}）",
+                    description=f"销毁实例 {instance_name}{'（含本地数据）' if delete_data else ''}（申请者: {sender_id}）",
                 )
                 admins = self.get_astrbot_admins()
                 at_parts = "".join(f"@{a} " for a in admins) if admins else "@管理员 "
@@ -104,7 +112,9 @@ class InstanceToolsMixin:
                 )
                 return
             # Admin executes directly
-            msg = await do_instance_action(self.client, instance_name, action)
+            msg = await do_instance_action(
+                self.client, instance_name, action, delete_data=delete_data
+            )
             yield event.plain_result(msg)
             return
 

@@ -16,13 +16,18 @@ async def do_create_instance(client: NCQQClient, instance_name: str) -> str:
 
 
 async def do_instance_action(
-    client: NCQQClient, instance_name: str, action: str
+    client: NCQQClient,
+    instance_name: str,
+    action: str,
+    delete_data: bool = False,
 ) -> str:
     try:
-        await client.make_request(
-            "POST", f"/api/containers/{instance_name}/action?action={action}"
-        )
-        return f"管理器底层回报：针对 {instance_name} 执行动作 {action} 成功。"
+        url = f"/api/containers/{instance_name}/action?action={action}"
+        if action == "delete" and delete_data:
+            url += "&delete_data=true"
+        await client.make_request("POST", url)
+        suffix = "（含本地数据）" if action == "delete" and delete_data else ""
+        return f"管理器底层回报：针对 {instance_name} 执行动作 {action}{suffix} 成功。"
     except Exception as e:
         return f"操作执行失败，原因: {e}"
 

@@ -116,7 +116,10 @@ class AdminToolsMixin:
         try:
             if action == "delete":
                 return await do_instance_action(
-                    self.client, params["instance_name"], "delete"
+                    self.client,
+                    params["instance_name"],
+                    "delete",
+                    delete_data=params.get("delete_data", False),
                 )
             if action == "create":
                 return await do_create_instance(self.client, params["instance_name"])
