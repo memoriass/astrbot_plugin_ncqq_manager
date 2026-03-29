@@ -1,6 +1,7 @@
 from astrbot.api.all import AstrMessageEvent, At, llm_tool
 
 from .actions import do_inject_by_alias
+from .approval import create_approval
 from .monitoring import do_get_radar_endpoints, do_save_radar_endpoints
 
 
@@ -20,7 +21,31 @@ class BackendToolsMixin:
             nickname (string): 可选昵称。若能从上下文确定目标用户称呼，可一并记录。
         """
         if not event.is_admin():
-            yield event.plain_result("权限不足。仅限管理员执行分配操作。")
+            sender_id = str(event.get_sender_id())
+            # Need @mention to know the target
+            at_users = [
+                comp.qq for comp in event.message_obj.message if isinstance(comp, At)
+            ]
+            target_uid = str(at_users[0]) if at_users else sender_id
+            approval_id = await create_approval(
+                self,
+                action="bind_instance",
+                params={
+                    "target_uid": target_uid,
+                    "instance_name": instance_name,
+                    "nickname": nickname,
+                },
+                requester_qq=sender_id,
+                group_id=str(event.get_group_id() or ""),
+                description=f"绑定实例 {instance_name} → QQ {target_uid}（申请者: {sender_id}）",
+            )
+            admins = self.get_astrbot_admins()
+            at_parts = "".join(f"@{a} " for a in admins) if admins else "@管理员 "
+            yield event.plain_result(
+                f"⚠️ 绑定实例属于高权限操作，已提交审批。\n"
+                f"审批 ID：{approval_id}\n"
+                f"请 {at_parts}回复确认（引用本条消息或说'plana 批准 {approval_id}'）。"
+            )
             return
 
         at_users = [
@@ -96,7 +121,23 @@ class BackendToolsMixin:
             token (string): 可选鉴权 token。
         """
         if not event.is_admin():
-            yield event.plain_result("权限不足。仅限管理员管理后端配置。")
+            sender_id = str(event.get_sender_id())
+            approval_action = f"manage_backends_{action}"
+            approval_id = await create_approval(
+                self,
+                action=approval_action,
+                params={"alias": alias, "url": url, "token": token},
+                requester_qq=sender_id,
+                group_id=str(event.get_group_id() or ""),
+                description=f"后端端点 {action}: alias={alias}（申请者: {sender_id}）",
+            )
+            admins = self.get_astrbot_admins()
+            at_parts = "".join(f"@{a} " for a in admins) if admins else "@管理员 "
+            yield event.plain_result(
+                f"⚠️ 管理后端端点属于高权限操作，已提交审批。\n"
+                f"审批 ID：{approval_id}\n"
+                f"请 {at_parts}回复确认（引用本条消息或说'plana 批准 {approval_id}'）。"
+            )
             return
 
         endpoints = await do_get_radar_endpoints(self.client)
@@ -137,36 +178,110 @@ class BackendToolsMixin:
         backend_alias: str,
         instance_keyword: str = "",
     ):
-        """将消息中被 @ 用户绑定的 ncqq 实例接入指定 BotShepherd 后端端点。
+        """将 ncqq 实例接入指定 BotShepherd 后端端点。
 
         后端已由云端统一集成，本工具只负责将雷达端点库中的指定别名注入到目标实例的
         BotShepherd connection（热重载立即生效，无需重启容器）。
-        适用场景：@某用户，给他的实例接入 gscore / astrbot 等后端别名。
-        必须依赖消息中的真实 @ 目标用户；若用户拥有多个实例且无法唯一定位，不要猜测，必须要求补充实例名。
+        适用场景：@某用户，给他的实例接入 gscore / astrbot / trss 等后端别名；
+        也可不 @ 用户，此时默认操作发送者自己绑定的实例。
+        若用户拥有多个实例且无法唯一定位，不要猜测，必须要求补充实例名。
         不适用于后端端点的新增删除，也不适用于实例绑定。
 
         Args:
-            backend_alias (string): 雷达端点库中的后端别名关键字，如 'gscore'、'astrbot'。
+            backend_alias (string): 雷达端点库中的后端别名关键字，如 'gscore'、'astrbot'、'trss'。
             instance_keyword (string): 可选实例关键字。目标用户有多个实例时应提供，用于唯一定位实例。
         """
-        if not event.is_admin():
-            yield event.plain_result("权限不足。仅限管理员执行运维路由对接。")
-            return
+        sender_id = str(event.get_sender_id())
+        is_admin = event.is_admin()
 
         at_users = [
             comp.qq for comp in event.message_obj.message if isinstance(comp, At)
         ]
-        if not at_users:
-            yield event.plain_result("无作用目标。请在会话中 @提及 对应用户。")
-            return
-        target_uid = str(at_users[0])
+        if at_users:
+            target_uid = str(at_users[0])
+        else:
+            # No @mention — fall back to the sender's own instances.
+            target_uid = sender_id
 
-        mapping = await self.get_user_mapping()
-        allowed = mapping.get(target_uid, {}).get("instances", [])
-        if not allowed:
-            yield event.plain_result(
-                f"执行失败。用户 {target_uid} 未绑定可操作的实例。"
+        # Non-admin injecting → approval required
+        if not is_admin:
+            allowed = await self.get_allowed_instances(target_uid)
+            if not allowed:
+                if at_users:
+                    yield event.plain_result(
+                        f"操作被拒绝。用户 {target_uid} 未绑定任何可操作实例，无法提交审批。"
+                    )
+                else:
+                    yield event.plain_result(
+                        "操作被拒绝。您未绑定任何可操作的 ncqq 实例，"
+                        "请联系管理员完成实例绑定后重试。"
+                    )
+                return
+            # Find endpoint first to validate alias
+            endpoints = await do_get_radar_endpoints(self.client)
+            matched = next(
+                (
+                    e
+                    for e in endpoints
+                    if backend_alias.lower() in e.get("alias", "").lower()
+                ),
+                None,
             )
+            if not matched:
+                yield event.plain_result(
+                    f"雷达端点库中不存在与 '{backend_alias}' 关联的端点，"
+                    f"请先通过 manage_ncqq_backends 添加。"
+                )
+                return
+            # Determine target instance
+            target_instance_name = ""
+            if instance_keyword:
+                for inst in allowed:
+                    if instance_keyword.lower() in inst.lower():
+                        target_instance_name = inst
+                        break
+                if not target_instance_name:
+                    yield event.plain_result(
+                        f"实例匹配失败。用户所控实例 {allowed} 均无匹配项 ('{instance_keyword}')。"
+                    )
+                    return
+            elif len(allowed) == 1:
+                target_instance_name = allowed[0]
+            else:
+                yield event.plain_result(
+                    f"多实例冲突。该用户存在多个可用实例 {allowed}，"
+                    f"请提供 instance_keyword 以明确目标。"
+                )
+                return
+
+            alias = matched["alias"]
+            approval_id = await create_approval(
+                self,
+                action="inject_backend",
+                params={"alias": alias, "instance_name": target_instance_name},
+                requester_qq=sender_id,
+                group_id=str(event.get_group_id() or ""),
+                description=f"接入后端 {alias} → 实例 {target_instance_name}（归属: {target_uid}）",
+            )
+            admins = self.get_astrbot_admins()
+            at_parts = "".join(f"@{a} " for a in admins) if admins else "@管理员 "
+            yield event.plain_result(
+                f"⚠️ 接入后端属于高权限操作，已提交审批。\n"
+                f"审批 ID：{approval_id}\n"
+                f"请 {at_parts}回复确认（引用本条消息或说'plana 批准 {approval_id}'）。"
+            )
+            return
+
+        allowed = await self.get_allowed_instances(target_uid)
+        if not allowed:
+            if at_users:
+                yield event.plain_result(
+                    f"执行失败。用户 {target_uid} 未绑定可操作的实例。"
+                )
+            else:
+                yield event.plain_result(
+                    "执行失败。您未绑定任何可操作的 ncqq 实例。请联系管理员执行绑定后重试。"
+                )
             return
 
         target_instance_name = ""

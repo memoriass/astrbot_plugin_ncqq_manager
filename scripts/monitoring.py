@@ -5,7 +5,8 @@ from .api import NCQQClient
 
 async def do_list_instances(
     client: NCQQClient, allowed_instances: list, is_admin: bool
-) -> str:
+) -> list | str:
+    """Return containers list on success, or an error str on failure."""
     try:
         res = await client.make_request("GET", "/api/containers")
         containers = res.get("containers", [])
@@ -16,7 +17,7 @@ async def do_list_instances(
         if not containers:
             return "当前没有任何您有权限查看的协议端实例正在运行。"
 
-        return f"你的实例列表获取成功，请将其转化为友好的文本展示:\n{json.dumps(containers, ensure_ascii=False)}"
+        return containers
     except Exception as e:
         return f"发生网络或配置错误: {e}"
 

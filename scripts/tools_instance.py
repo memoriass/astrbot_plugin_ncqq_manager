@@ -1,9 +1,11 @@
 import json
 
-from astrbot.api.all import AstrMessageEvent, llm_tool
+from astrbot.api.all import AstrMessageEvent, Image, llm_tool
 
 from .actions import do_create_instance, do_instance_action
+from .approval import create_approval
 from .config_manager import do_read_config, do_write_config
+from .html_renderer import render_instances
 from .interaction import (
     do_check_login_status,
     do_get_qrcode,
@@ -26,19 +28,37 @@ class InstanceToolsMixin:
         mapping = await self.get_user_mapping()
         allowed = mapping.get(sender_id, {}).get("instances", [])
 
-        msg = await do_list_instances(self.client, allowed, is_admin)
+        result = await do_list_instances(self.client, allowed, is_admin)
 
+        # Error string returned directly
+        if isinstance(result, str):
+            yield event.plain_result(result)
+            return
+
+        # Attach nickname mapping as a hidden prefix for LLM context
         nicknames_dict = {
             qq: data.get("nickname", qq)
             for qq, data in mapping.items()
             if data.get("nickname")
         }
-        # 昵称对照信息作为辅助前缀传给 LLM，格式简洁不暴露提示词标签
-        prefix = ""
-        if nicknames_dict:
-            prefix = f"[昵称对照: {json.dumps(nicknames_dict, ensure_ascii=False)}]\n"
 
-        yield event.plain_result(prefix + msg)
+        rendered = await render_instances(result)
+
+        if isinstance(rendered, bytes):
+            # Playwright produced a PNG — send as image
+            import base64 as _b64
+            b64 = _b64.b64encode(rendered).decode()
+            yield event.chain_result([Image.fromBase64(b64)])
+            # Still append LLM-friendly nickname hint as a follow-up text
+            if nicknames_dict:
+                hint = f"[昵称对照: {json.dumps(nicknames_dict, ensure_ascii=False)}]"
+                yield event.plain_result(hint)
+        else:
+            # Plain-text fallback
+            prefix = ""
+            if nicknames_dict:
+                prefix = f"[昵称对照: {json.dumps(nicknames_dict, ensure_ascii=False)}]\n"
+            yield event.plain_result(prefix + rendered)
 
     @llm_tool(name="ncqq_instance_action")
     async def instance_action(
@@ -56,13 +76,45 @@ class InstanceToolsMixin:
         sender_id = str(event.get_sender_id())
         is_admin = event.is_admin()
 
-        if not is_admin:
-            if action == "delete":
-                yield event.plain_result("越权。销毁请求拦截，仅 Owner 支持操作机制。")
+        # delete is a destructive high-privilege action — requires admin or approval
+        if action == "delete":
+            if not is_admin:
+                # Only bound users may submit a delete approval for their own instances
+                allowed = await self.get_allowed_instances(sender_id)
+                if instance_name not in allowed:
+                    yield event.plain_result(
+                        f"操作被拒绝。实例 {instance_name} 不在您的绑定列表中，"
+                        "无法申请销毁。请联系管理员直接操作。"
+                    )
+                    return
+                approval_id = await create_approval(
+                    self,
+                    action="delete",
+                    params={"instance_name": instance_name},
+                    requester_qq=sender_id,
+                    group_id=str(event.get_group_id() or ""),
+                    description=f"销毁实例 {instance_name}（申请者: {sender_id}）",
+                )
+                admins = self.get_astrbot_admins()
+                at_parts = "".join(f"@{a} " for a in admins) if admins else "@管理员 "
+                yield event.plain_result(
+                    f"⚠️ 销毁实例属于高权限操作，已提交审批。\n"
+                    f"审批 ID：{approval_id}\n"
+                    f"请 {at_parts}回复确认（引用本条消息或说'plana 批准 {approval_id}'）。"
+                )
                 return
+            # Admin executes directly
+            msg = await do_instance_action(self.client, instance_name, action)
+            yield event.plain_result(msg)
+            return
+
+        # Non-destructive actions: check binding
+        if not is_admin:
             allowed = await self.get_allowed_instances(sender_id)
             if instance_name not in allowed:
-                yield event.plain_result("越权。操作目标非您绑定下辖的实例。")
+                yield event.plain_result(
+                    "操作被拒绝。目标实例不在您的绑定列表中，请联系管理员先完成实例绑定。"
+                )
                 return
 
         msg = await do_instance_action(self.client, instance_name, action)
@@ -233,12 +285,28 @@ class InstanceToolsMixin:
 
         仅在用户明确要求创建、初始化、生成实例时调用。
         不要把绑定用户、接入后端、拉取二维码误判为创建实例。
+        管理员直接执行；其他用户提交审批由管理员确认后执行。
 
         Args:
             instance_name (string): 要创建的 ncqq 实例名。
         """
         if not event.is_admin():
-            yield event.plain_result("权限拦截。")
+            sender_id = str(event.get_sender_id())
+            approval_id = await create_approval(
+                self,
+                action="create",
+                params={"instance_name": instance_name},
+                requester_qq=sender_id,
+                group_id=str(event.get_group_id() or ""),
+                description=f"创建实例 {instance_name}（申请者: {sender_id}）",
+            )
+            admins = self.get_astrbot_admins()
+            at_parts = "".join(f"@{a} " for a in admins) if admins else "@管理员 "
+            yield event.plain_result(
+                f"⚠️ 创建实例属于高权限操作，已提交审批。\n"
+                f"审批 ID：{approval_id}\n"
+                f"请 {at_parts}回复确认（引用本条消息或说'plana 批准 {approval_id}'）。"
+            )
             return
 
         msg = await do_create_instance(self.client, instance_name)
@@ -291,8 +359,9 @@ class InstanceToolsMixin:
     ):
         """覆写 ncqq 实例容器内的配置文件。
 
-        仅适用于管理员明确要求修改、写入、覆盖配置文件内容的场景。
-        这是高风险操作，不适用于读取配置、查看状态、普通问答。
+        高风险操作，不适用于读取配置、查看状态、普通问答。
+        管理员直接执行；绑定用户可对自己绑定的实例提交审批，由管理员确认后执行。
+        未绑定该实例的用户无法提交此操作。
 
         Args:
             instance_name (string): 要写入配置的 ncqq 实例名。
@@ -300,7 +369,34 @@ class InstanceToolsMixin:
             file_content (string): 要完整写入的文件内容，应为最终内容而不是增量片段。
         """
         if not event.is_admin():
-            yield event.plain_result("权限拦截。")
+            sender_id = str(event.get_sender_id())
+            # Verify the requester has binding access to this instance
+            allowed = await self.get_allowed_instances(sender_id)
+            if instance_name not in allowed:
+                yield event.plain_result(
+                    f"操作被拒绝。实例 {instance_name} 不在您的绑定列表中，"
+                    "无法申请覆写配置。请联系管理员先完成实例绑定。"
+                )
+                return
+            approval_id = await create_approval(
+                self,
+                action="write_config",
+                params={
+                    "instance_name": instance_name,
+                    "file_name": file_name,
+                    "file_content": file_content,
+                },
+                requester_qq=sender_id,
+                group_id=str(event.get_group_id() or ""),
+                description=f"覆写配置 {instance_name}/{file_name}（申请者: {sender_id}）",
+            )
+            admins = self.get_astrbot_admins()
+            at_parts = "".join(f"@{a} " for a in admins) if admins else "@管理员 "
+            yield event.plain_result(
+                f"⚠️ 覆写配置属于高权限操作，已提交审批。\n"
+                f"审批 ID：{approval_id}\n"
+                f"请 {at_parts}回复确认（引用本条消息或说'plana 批准 {approval_id}'）。"
+            )
             return
 
         msg = await do_write_config(self.client, instance_name, file_name, file_content)
