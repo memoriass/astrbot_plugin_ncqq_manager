@@ -260,6 +260,7 @@ async def _ensure_browser():
     try:
         from playwright.async_api import async_playwright  # type: ignore
     except ImportError:
+        logger.warning("playwright 未安装，HTML 卡片渲染不可用，将回退纯文本")
         return None
     try:
         _playwright_instance = await async_playwright().start()
@@ -382,8 +383,11 @@ async def render_instances(containers: list[dict]) -> Union[str, bytes]:
     if not containers:
         return "当前没有任何实例。"
     html, body_width = _render_html(containers)
+    logger.info("render_instances: %d 个实例, body_width=%dpx, 开始截图...", len(containers), body_width)
     png = await _screenshot_html(html, viewport_width=body_width)
     if png:
+        logger.info("render_instances: 截图成功, %d bytes", len(png))
         return png
+    logger.warning("render_instances: playwright 截图失败, 回退纯文本")
     return _plain_text(containers)
 
