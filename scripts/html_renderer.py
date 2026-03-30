@@ -6,9 +6,7 @@ Priority chain:
 """
 from __future__ import annotations
 
-import base64
 import datetime
-import io
 import logging
 import os
 import pathlib
@@ -31,7 +29,7 @@ _BG_DIR: pathlib.Path | None = None
 # 支持的壁纸扩展名
 _BG_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
-# 壁纸缓存：基于目录 mtime 自动失效，每条记录为 (data_uri, pixel_width)
+# 壁纸缓存：基于目录 mtime 自动失效，每条记录为 (file_uri, pixel_width)
 _wallpaper_cache: list[tuple[str, int]] = []
 _wallpaper_dir_mtime: float = 0.0
 
@@ -83,8 +81,10 @@ def _image_width(data: bytes) -> int:
 
 
 def _load_wallpapers() -> list[tuple[str, int]]:
-    """扫描 backgrounds/ 目录，返回 [(data_uri, pixel_width), ...] 列表。
+    """扫描 backgrounds/ 目录，返回 [(file_uri, pixel_width), ...] 列表。
 
+    使用 file:// URI 直接引用本地文件，避免 base64 编码占用大量内存。
+    Playwright 通过 file:// 协议加载 HTML，可直接访问本地文件。
     使用 mtime 缓存：目录修改时间不变时直接返回上次结果。
     """
     global _wallpaper_cache, _wallpaper_dir_mtime
@@ -101,11 +101,12 @@ def _load_wallpapers() -> list[tuple[str, int]]:
         if f.suffix.lower() not in _BG_EXTS:
             continue
         try:
+            # 只读取少量头部字节来获取宽度，不再全量读取
             raw = f.read_bytes()
-            mime = "image/jpeg" if f.suffix.lower() in {".jpg", ".jpeg"} else f"image/{f.suffix.lower().lstrip('.')}"
-            uri = f"data:{mime};base64,{base64.b64encode(raw).decode()}"
             width = _image_width(raw)
-            entries.append((uri, width))
+            # 使用 file:// URI，避免 base64 编码大图占内存
+            file_uri = pathlib.Path(f).resolve().as_uri()
+            entries.append((file_uri, width))
         except Exception as e:
             logger.warning("wallpaper load failed: %s — %s", f.name, e)
     _wallpaper_cache = entries

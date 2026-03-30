@@ -16,7 +16,7 @@ from .scripts.tools_instance import InstanceToolsMixin
 
 
 @register(
-    "ncqq_manager", "AstrBot", "NapCatQQ 容器控制与后端路由插件", "1.0.0", "repo_url"
+    "ncqq_manager", "AstrBot", "NapCatQQ 容器控制与后端路由插件", "2.0.0", "repo_url"
 )
 class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsMixin):
     def __init__(self, context: Context, config: dict):
@@ -50,7 +50,8 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsM
                 func_tool.handler_module_path = __name__
 
     async def terminate(self):
-        """插件卸载/重载时清理 playwright 浏览器实例。"""
+        """插件卸载/重载时清理资源。"""
+        await self.client.close()
         await cleanup_renderer()
 
     # ------------------------------------------------------------------
@@ -75,15 +76,14 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsM
         AstrBot admins (admins_id) are treated as super-owners and have
         access to all instances across all bound users.
         """
+        mapping = await self.get_user_mapping()
         if str(sender_id) in self.get_astrbot_admins():
-            mapping = await self.get_user_mapping()
             all_instances: list[str] = []
             for data in mapping.values():
                 for inst in data.get("instances", []):
                     if inst not in all_instances:
                         all_instances.append(inst)
             return all_instances
-        mapping = await self.get_user_mapping()
         return mapping.get(str(sender_id), {}).get("instances", [])
 
     def get_first_at_user_id(self, event: AstrMessageEvent) -> str | None:
@@ -95,6 +95,33 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsM
     async def get_instances_for_user(self, user_id: str) -> list[str]:
         mapping = await self.get_user_mapping()
         return mapping.get(str(user_id), {}).get("instances", [])
+
+    # ------------------------------------------------------------------
+    # Approval notice helpers (消除重复的审批通知模板)
+    # ------------------------------------------------------------------
+
+    def _approval_notice_single(self, action_label: str, approval_id: str) -> str:
+        """生成单条审批通知文本。"""
+        admins = self.get_astrbot_admins()
+        at_parts = "".join(f"@{a} " for a in admins) if admins else "@管理员 "
+        return (
+            f"⚠️ {action_label}属于高权限操作，已提交审批。\n"
+            f"审批 ID：{approval_id}\n"
+            f"请 {at_parts}回复确认（引用本条消息或说'plana 批准 {approval_id}'）。"
+        )
+
+    def _approval_notice_batch(
+        self, action_label: str, name_id_pairs: list[tuple[str, str]]
+    ) -> str:
+        """生成批量审批通知文本。name_id_pairs: [(instance_name, approval_id), ...]"""
+        admins = self.get_astrbot_admins()
+        at_parts = "".join(f"@{a} " for a in admins) if admins else "@管理员 "
+        id_lines = "\n".join(f"  {n} → {aid}" for n, aid in name_id_pairs)
+        return (
+            f"⚠️ {action_label}属于高权限操作，已提交 {len(name_id_pairs)} 条审批。\n"
+            f"{id_lines}\n"
+            f"请 {at_parts}逐条批准。"
+        )
 
     # ------------------------------------------------------------------
     # Pending approvals KV helpers

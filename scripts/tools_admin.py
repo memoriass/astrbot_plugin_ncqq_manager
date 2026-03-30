@@ -108,71 +108,116 @@ class AdminToolsMixin:
         yield event.plain_result(msg)
 
     # ------------------------------------------------------------------
-    # Internal dispatcher for approved actions
+    # Internal dispatcher for approved actions (dict-based)
     # ------------------------------------------------------------------
 
     async def _dispatch_approved_action(self, action: str, params: dict) -> str:
         """Execute a previously approved high-privilege action and return result."""
-        try:
-            if action == "delete":
-                return await do_instance_action(
-                    self.client,
-                    params["instance_name"],
-                    "delete",
-                    delete_data=params.get("delete_data", False),
-                )
-            if action == "create":
-                return await do_create_instance(self.client, params["instance_name"])
-            if action == "write_config":
-                return await do_write_config(
-                    self.client,
-                    params["instance_name"],
-                    params["file_name"],
-                    params["file_content"],
-                )
-            if action == "inject_backend":
-                return await do_inject_by_alias(
-                    self.client,
-                    alias=params["alias"],
-                    target="bs",
-                    conn_id=params["instance_name"],
-                )
-            if action == "bind_instance":
-                mapping = await self.get_user_mapping()
-                target_uid = params["target_uid"]
-                instance_name = params["instance_name"]
-                nickname = params.get("nickname", "")
-                if target_uid not in mapping:
-                    mapping[target_uid] = {"nickname": "", "instances": []}
-                if instance_name not in mapping[target_uid]["instances"]:
-                    mapping[target_uid]["instances"].append(instance_name)
-                if nickname:
-                    mapping[target_uid]["nickname"] = nickname
-                await self.save_user_mapping(mapping)
-                return (
-                    f"绑定完成。目标QQ: {target_uid}"
-                    f" | 实例: {instance_name}"
-                    f" | 昵称: {nickname or '无'}"
-                )
-            if action == "manage_backends_add":
-                endpoints = await do_get_radar_endpoints(self.client)
-                alias = params["alias"]
-                url = params["url"]
-                token = params.get("token", "")
-                existing = next((e for e in endpoints if e.get("alias") == alias), None)
-                if existing:
-                    existing["url"] = url
-                    existing["token"] = token
-                else:
-                    endpoints.append({"alias": alias, "url": url, "token": token})
-                result = await do_save_radar_endpoints(self.client, endpoints)
-                return f"端点已添加/更新: alias={alias} url={url}  {result}"
-            if action == "manage_backends_remove":
-                endpoints = await do_get_radar_endpoints(self.client)
-                alias = params["alias"]
-                new_endpoints = [e for e in endpoints if e.get("alias") != alias]
-                result = await do_save_radar_endpoints(self.client, new_endpoints)
-                return f"端点已删除: alias={alias}  {result}"
+        handlers = {
+            "delete": self._handle_delete,
+            "create": self._handle_create,
+            "write_config": self._handle_write_config,
+            "inject_backend": self._handle_inject_backend,
+            "bind_instance": self._handle_bind_instance,
+            "manage_backends_add": self._handle_manage_backends_add,
+            "manage_backends_remove": self._handle_manage_backends_remove,
+        }
+        handler = handlers.get(action)
+        if handler is None:
             return f"未知操作类型 '{action}'，请联系开发者。"
+        try:
+            return await handler(params)
         except Exception as e:
             return f"执行失败: {e}"
+
+    # --- 以下为各 action 的具体处理方法 ---
+
+    async def _handle_delete(self, params: dict) -> str:
+        inst_name = params["instance_name"]
+        result = await do_instance_action(
+            self.client,
+            inst_name,
+            "delete",
+            delete_data=params.get("delete_data", False),
+        )
+        # 删除成功后自动清理 user_mapping 中对该实例的残留引用
+        if "成功" in result:
+            mapping = await self.get_user_mapping()
+            changed = False
+            for uid, data in mapping.items():
+                insts = data.get("instances", [])
+                if inst_name in insts:
+                    insts.remove(inst_name)
+                    changed = True
+            if changed:
+                await self.save_user_mapping(mapping)
+                result += f"\n已自动解除所有用户与实例 {inst_name} 的绑定。"
+        return result
+
+    async def _handle_create(self, params: dict) -> str:
+        # 兼容旧审批记录（instance_name 单值）和新格式（instance_names 列表）
+        names = params.get("instance_names") or [params["instance_name"]]
+        results = []
+        for n in names:
+            results.append(await do_create_instance(self.client, n))
+        return "\n".join(results)
+
+    async def _handle_write_config(self, params: dict) -> str:
+        return await do_write_config(
+            self.client,
+            params["instance_name"],
+            params["file_name"],
+            params["file_content"],
+        )
+
+    async def _handle_inject_backend(self, params: dict) -> str:
+        return await do_inject_by_alias(
+            self.client,
+            alias=params["alias"],
+            target="bs",
+            conn_id=params["instance_name"],
+        )
+
+    async def _handle_bind_instance(self, params: dict) -> str:
+        mapping = await self.get_user_mapping()
+        target_uid = params["target_uid"]
+        # 兼容旧审批记录（instance_name 单值）和新格式（instance_names 列表）
+        names = params.get("instance_names") or [params["instance_name"]]
+        nickname = params.get("nickname", "")
+        if target_uid not in mapping:
+            mapping[target_uid] = {"nickname": "", "instances": []}
+        added = []
+        for n in names:
+            if n not in mapping[target_uid]["instances"]:
+                mapping[target_uid]["instances"].append(n)
+                added.append(n)
+        if nickname:
+            mapping[target_uid]["nickname"] = nickname
+        await self.save_user_mapping(mapping)
+        added_str = "、".join(added) if added else "（均已存在，无新增）"
+        return (
+            f"绑定完成。目标QQ: {target_uid}"
+            f" | 新增实例: {added_str}"
+            f" | 昵称: {nickname or '无'}"
+        )
+
+    async def _handle_manage_backends_add(self, params: dict) -> str:
+        endpoints = await do_get_radar_endpoints(self.client)
+        alias = params["alias"]
+        url = params["url"]
+        token = params.get("token", "")
+        existing = next((e for e in endpoints if e.get("alias") == alias), None)
+        if existing:
+            existing["url"] = url
+            existing["token"] = token
+        else:
+            endpoints.append({"alias": alias, "url": url, "token": token})
+        result = await do_save_radar_endpoints(self.client, endpoints)
+        return f"端点已添加/更新: alias={alias} url={url}  {result}"
+
+    async def _handle_manage_backends_remove(self, params: dict) -> str:
+        endpoints = await do_get_radar_endpoints(self.client)
+        alias = params["alias"]
+        new_endpoints = [e for e in endpoints if e.get("alias") != alias]
+        result = await do_save_radar_endpoints(self.client, new_endpoints)
+        return f"端点已删除: alias={alias}  {result}"

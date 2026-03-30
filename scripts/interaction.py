@@ -1,6 +1,10 @@
+import logging
+
 from astrbot.api.all import Image
 
 from .api import NCQQClient
+
+logger = logging.getLogger(__name__)
 
 
 async def do_check_login_status(client: NCQQClient, instance_name: str) -> dict:
@@ -15,7 +19,8 @@ async def do_check_login_status(client: NCQQClient, instance_name: str) -> dict:
         )
         return res if isinstance(res, dict) else {"status": "ok", "logged_in": False}
     except Exception as e:
-        return {"status": "error", "logged_in": False, "msg": f"接口故障: {e}"}
+        logger.warning("刷新登录状态 %s 失败: %s", instance_name, e)
+        return {"status": "error", "logged_in": False, "msg": "接口故障，请稍后重试。"}
 
 
 def is_qrcode_available_status(status_payload: dict) -> tuple[bool, str]:
@@ -83,4 +88,5 @@ async def do_get_qrcode(client: NCQQClient, instance_name: str) -> list:
 
         return [f"接口返回未知状态：{res}"]
     except Exception as e:
-        return [f"接口调用异常: {e}"]
+        logger.warning("获取二维码 %s 失败: %s", instance_name, e)
+        return ["接口调用异常，请稍后重试。"]

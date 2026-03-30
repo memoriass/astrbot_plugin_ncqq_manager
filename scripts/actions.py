@@ -1,6 +1,9 @@
 import json
+import logging
 
 from .api import NCQQClient
+
+logger = logging.getLogger(__name__)
 
 
 async def do_create_instance(client: NCQQClient, instance_name: str) -> str:
@@ -12,7 +15,8 @@ async def do_create_instance(client: NCQQClient, instance_name: str) -> str:
             f"创建实例指令已发送！管理器返回：\n{json.dumps(res, ensure_ascii=False)}"
         )
     except Exception as e:
-        return f"创建失败: {e}"
+        logger.warning("创建实例 %s 失败: %s", instance_name, e)
+        return f"创建失败，请稍后重试或联系管理员。"
 
 
 async def do_instance_action(
@@ -29,7 +33,8 @@ async def do_instance_action(
         suffix = "（含本地数据）" if action == "delete" and delete_data else ""
         return f"管理器底层回报：针对 {instance_name} 执行动作 {action}{suffix} 成功。"
     except Exception as e:
-        return f"操作执行失败，原因: {e}"
+        logger.warning("实例 %s 执行 %s 失败: %s", instance_name, action, e)
+        return f"操作执行失败，请稍后重试或联系管理员。"
 
 
 async def do_inject_by_alias(
@@ -58,6 +63,7 @@ async def do_inject_by_alias(
         msg = res.get("message", "") if isinstance(res, dict) else str(res)
         if status == "ok":
             return f"注入成功。别名={alias} target={target} {'conn_id=' + (conn_id or container_name) if target == 'bs' else 'container=' + container_name}  {msg}".strip()
-        return f"注入返回异常: {res}"
+        return f"注入返回异常状态，请联系管理员排查。"
     except Exception as e:
-        return f"注入失败: {e}"
+        logger.warning("注入 alias=%s target=%s 失败: %s", alias, target, e)
+        return f"注入失败，请稍后重试或联系管理员。"

@@ -1,4 +1,6 @@
+import base64
 import json
+import re
 
 from astrbot.api.all import AstrMessageEvent, Image, llm_tool
 
@@ -25,8 +27,7 @@ class InstanceToolsMixin:
         sender_id = str(event.get_sender_id())
         is_admin = event.is_admin()
 
-        mapping = await self.get_user_mapping()
-        allowed = mapping.get(sender_id, {}).get("instances", [])
+        allowed = await self.get_allowed_instances(sender_id)
 
         result = await do_list_instances(self.client, allowed, is_admin)
 
@@ -36,6 +37,7 @@ class InstanceToolsMixin:
             return
 
         # Attach nickname mapping as a hidden prefix for LLM context
+        mapping = await self.get_user_mapping()
         nicknames_dict = {
             qq: data.get("nickname", qq)
             for qq, data in mapping.items()
@@ -46,8 +48,7 @@ class InstanceToolsMixin:
 
         if isinstance(rendered, bytes):
             # Playwright produced a PNG — send as image
-            import base64 as _b64
-            b64 = _b64.b64encode(rendered).decode()
+            b64 = base64.b64encode(rendered).decode()
             yield event.chain_result([Image.fromBase64(b64)])
             # Still append LLM-friendly nickname hint as a follow-up text
             if nicknames_dict:
@@ -64,71 +65,98 @@ class InstanceToolsMixin:
     async def instance_action(
         self,
         event: AstrMessageEvent,
-        instance_name: str,
+        instance_names: str,
         action: str,
         delete_data: bool = False,
     ):
-        """执行 ncqq 实例的基础管理动作。
+        """执行 ncqq 实例的基础管理动作，支持一次操作多个实例。
 
         仅在用户明确表达 start、stop、restart、pause、unpause、kill、delete 这类动作意图时调用。
         不要把查看状态、获取二维码、查询配置误判为实例动作。
 
         Args:
-            instance_name (string): 要操作的 ncqq 实例名，必须是明确的实例标识，不是用户昵称。
+            instance_names (string): 要操作的 ncqq 实例名，支持一次传入多个，用逗号分隔，例如 "bot1,bot2"。必须是明确的实例标识，不是用户昵称。
             action (string): 管理动作。只应为 start、stop、restart、pause、unpause、kill、delete 之一。pause/unpause 暂停/恢复容器进程；kill 强制终止；delete 销毁容器。
             delete_data (boolean): 仅在 action 为 delete 时有效。为 true 时同时删除该实例在管理器上的本地数据目录（QQ数据、配置、插件、缓存），不可恢复；为 false 时仅移除容器但保留数据。请根据用户意图判断：用户说"彻底删除""清除所有数据""删干净"等表达时设为 true；仅说"删除实例""移除容器"时设为 false。默认为 false。
         """
+
+        names = [n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()]
+        if not names:
+            yield event.plain_result("未识别到有效的实例名称，请提供至少一个实例名。")
+            return
+
         sender_id = str(event.get_sender_id())
         is_admin = event.is_admin()
 
         # delete is a destructive high-privilege action — requires admin or approval
         if action == "delete":
             if not is_admin:
-                # Only bound users may submit a delete approval for their own instances
                 allowed = await self.get_allowed_instances(sender_id)
-                if instance_name not in allowed:
+                rejected = [n for n in names if n not in allowed]
+                if rejected:
                     yield event.plain_result(
-                        f"操作被拒绝。实例 {instance_name} 不在您的绑定列表中，"
+                        f"操作被拒绝。实例 {'、'.join(rejected)} 不在您的绑定列表中，"
                         "无法申请销毁。请联系管理员直接操作。"
                     )
                     return
-                approval_id = await create_approval(
-                    self,
-                    action="delete",
-                    params={
-                        "instance_name": instance_name,
-                        "delete_data": delete_data,
-                    },
-                    requester_qq=sender_id,
-                    group_id=str(event.get_group_id() or ""),
-                    description=f"销毁实例 {instance_name}{'（含本地数据）' if delete_data else ''}（申请者: {sender_id}）",
-                )
-                admins = self.get_astrbot_admins()
-                at_parts = "".join(f"@{a} " for a in admins) if admins else "@管理员 "
+                # 为每个实例单独创建审批记录
+                ids = []
+                for n in names:
+                    aid = await create_approval(
+                        self,
+                        action="delete",
+                        params={"instance_name": n, "delete_data": delete_data},
+                        requester_qq=sender_id,
+                        group_id=str(event.get_group_id() or ""),
+                        description=f"销毁实例 {n}{'（含本地数据）' if delete_data else ''}（申请者: {sender_id}）",
+                    )
+                    ids.append(aid)
                 yield event.plain_result(
-                    f"⚠️ 销毁实例属于高权限操作，已提交审批。\n"
-                    f"审批 ID：{approval_id}\n"
-                    f"请 {at_parts}回复确认（引用本条消息或说'plana 批准 {approval_id}'）。"
+                    self._approval_notice_batch("销毁实例", list(zip(names, ids)))
                 )
                 return
             # Admin executes directly
-            msg = await do_instance_action(
-                self.client, instance_name, action, delete_data=delete_data
-            )
-            yield event.plain_result(msg)
+            results: list[str] = []
+            cleaned: list[str] = []
+            for n in names:
+                msg = await do_instance_action(
+                    self.client, n, action, delete_data=delete_data
+                )
+                results.append(msg)
+                # 删除成功后自动清理 user_mapping 中对该实例的残留引用
+                if "成功" in msg:
+                    cleaned.append(n)
+            if cleaned:
+                mapping = await self.get_user_mapping()
+                changed = False
+                for uid, data in mapping.items():
+                    for inst_name in cleaned:
+                        insts = data.get("instances", [])
+                        if inst_name in insts:
+                            insts.remove(inst_name)
+                            changed = True
+                if changed:
+                    await self.save_user_mapping(mapping)
+                    results.append(f"已自动解除所有用户与实例 {'、'.join(cleaned)} 的绑定。")
+            yield event.plain_result("\n".join(results))
             return
 
         # Non-destructive actions: check binding
         if not is_admin:
             allowed = await self.get_allowed_instances(sender_id)
-            if instance_name not in allowed:
+            rejected = [n for n in names if n not in allowed]
+            if rejected:
                 yield event.plain_result(
-                    "操作被拒绝。目标实例不在您的绑定列表中，请联系管理员先完成实例绑定。"
+                    f"操作被拒绝。实例 {'、'.join(rejected)} 不在您的绑定列表中，"
+                    "请联系管理员先完成实例绑定。"
                 )
                 return
 
-        msg = await do_instance_action(self.client, instance_name, action)
-        yield event.plain_result(msg)
+        results = []
+        for n in names:
+            msg = await do_instance_action(self.client, n, action)
+            results.append(msg)
+        yield event.plain_result("\n".join(results))
 
     @llm_tool(name="get_ncqq_qrcode")
     async def get_qrcode(self, event: AstrMessageEvent, instance_name: str = ""):
@@ -236,40 +264,52 @@ class InstanceToolsMixin:
                 yield event.chain_result([item])
 
     @llm_tool(name="check_ncqq_login_status")
-    async def check_login_status(self, event: AstrMessageEvent, instance_name: str):
-        """刷新并检查 ncqq 实例的实时登录状态。
+    async def check_login_status(self, event: AstrMessageEvent, instance_names: str):
+        """刷新并检查 ncqq 实例的实时登录状态，支持一次检查多个实例。
 
         适用于用户询问某实例是否在线、是否掉线、是否扫码成功、是否仍需登录时。
         此工具只返回状态信息，不返回二维码图片。
 
         Args:
-            instance_name (string): 要检查登录状态的 ncqq 实例名。
+            instance_names (string): 要检查登录状态的 ncqq 实例名，支持一次传入多个，用逗号分隔，例如 "bot1,bot2"。
         """
+
+        names = [n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()]
+        if not names:
+            yield event.plain_result("未识别到有效的实例名称，请提供至少一个实例名。")
+            return
+
         sender_id = str(event.get_sender_id())
         is_admin = event.is_admin()
 
         if not is_admin:
             allowed = await self.get_allowed_instances(sender_id)
-            if instance_name not in allowed:
-                yield event.plain_result("越权拦截。")
+            rejected = [n for n in names if n not in allowed]
+            if rejected:
+                yield event.plain_result(
+                    f"越权拦截。实例 {'、'.join(rejected)} 不在您的绑定列表中。"
+                )
                 return
 
-        payload = await do_check_login_status(self.client, instance_name)
-        logged_in = payload.get("logged_in", False)
-        uin = payload.get("uin", "")
-        nickname = payload.get("nickname", "")
-        method = payload.get("method", "")
-        err_msg = payload.get("msg", "")
-        if payload.get("status") == "error":
-            status_text = f"接口故障：{err_msg}"
-        elif logged_in:
-            label = f"{nickname}({uin})" if uin else uin or "未知"
-            status_text = f"在线 ✅  账号：{label}  检测方式：{method}"
-        else:
-            status_text = "离线 / 未登录 ⚠️"
-        yield event.plain_result(f"[{instance_name}] 登录状态：{status_text}")
+        lines: list[str] = []
+        for name in names:
+            payload = await do_check_login_status(self.client, name)
+            logged_in = payload.get("logged_in", False)
+            uin = payload.get("uin", "")
+            nickname = payload.get("nickname", "")
+            method = payload.get("method", "")
+            err_msg = payload.get("msg", "")
+            if payload.get("status") == "error":
+                status_text = f"接口故障：{err_msg}"
+            elif logged_in:
+                label = f"{nickname}({uin})" if uin else uin or "未知"
+                status_text = f"在线 ✅  账号：{label}  检测方式：{method}"
+            else:
+                status_text = "离线 / 未登录 ⚠️"
+            lines.append(f"[{name}] 登录状态：{status_text}")
+        yield event.plain_result("\n".join(lines))
 
-    @llm_tool(name="moniter_ncqq_usage")
+    @llm_tool(name="monitor_ncqq_usage")
     async def get_monitor(
         self, event: AstrMessageEvent, instance_name: str, fetch_logs: bool = False
     ):
@@ -290,37 +330,43 @@ class InstanceToolsMixin:
         yield event.plain_result(msg)
 
     @llm_tool(name="create_ncqq_instance")
-    async def create_instance(self, event: AstrMessageEvent, instance_name: str):
-        """创建新的 ncqq 实例。
+    async def create_instance(self, event: AstrMessageEvent, instance_names: str):
+        """创建新的 ncqq 实例，支持一次创建多个。
 
         仅在用户明确要求创建、初始化、生成实例时调用。
         不要把绑定用户、接入后端、拉取二维码误判为创建实例。
         管理员直接执行；其他用户提交审批由管理员确认后执行。
 
         Args:
-            instance_name (string): 要创建的 ncqq 实例名。
+            instance_names (string): 要创建的 ncqq 实例名。支持一次传入多个，用逗号分隔，例如 "bot1,bot2,bot3"。
         """
+
+        names = [n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()]
+        if not names:
+            yield event.plain_result("未识别到有效的实例名称，请提供至少一个实例名。")
+            return
+
         if not event.is_admin():
             sender_id = str(event.get_sender_id())
+            label = "、".join(names)
             approval_id = await create_approval(
                 self,
                 action="create",
-                params={"instance_name": instance_name},
+                params={"instance_names": names},
                 requester_qq=sender_id,
                 group_id=str(event.get_group_id() or ""),
-                description=f"创建实例 {instance_name}（申请者: {sender_id}）",
+                description=f"创建实例 {label}（申请者: {sender_id}）",
             )
-            admins = self.get_astrbot_admins()
-            at_parts = "".join(f"@{a} " for a in admins) if admins else "@管理员 "
             yield event.plain_result(
-                f"⚠️ 创建实例属于高权限操作，已提交审批。\n"
-                f"审批 ID：{approval_id}\n"
-                f"请 {at_parts}回复确认（引用本条消息或说'plana 批准 {approval_id}'）。"
+                self._approval_notice_single("创建实例", approval_id)
             )
             return
 
-        msg = await do_create_instance(self.client, instance_name)
-        yield event.plain_result(msg)
+        results: list[str] = []
+        for name in names:
+            msg = await do_create_instance(self.client, name)
+            results.append(msg)
+        yield event.plain_result("\n".join(results))
 
     @llm_tool(name="list_ncqq_assets")
     async def list_assets(self, event: AstrMessageEvent):
@@ -400,12 +446,8 @@ class InstanceToolsMixin:
                 group_id=str(event.get_group_id() or ""),
                 description=f"覆写配置 {instance_name}/{file_name}（申请者: {sender_id}）",
             )
-            admins = self.get_astrbot_admins()
-            at_parts = "".join(f"@{a} " for a in admins) if admins else "@管理员 "
             yield event.plain_result(
-                f"⚠️ 覆写配置属于高权限操作，已提交审批。\n"
-                f"审批 ID：{approval_id}\n"
-                f"请 {at_parts}回复确认（引用本条消息或说'plana 批准 {approval_id}'）。"
+                self._approval_notice_single("覆写配置", approval_id)
             )
             return
 

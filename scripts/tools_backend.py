@@ -1,3 +1,5 @@
+import re
+
 from astrbot.api.all import AstrMessageEvent, At, llm_tool
 
 from .actions import do_inject_by_alias
@@ -8,18 +10,26 @@ from .monitoring import do_get_radar_endpoints, do_save_radar_endpoints
 class BackendToolsMixin:
     @llm_tool(name="bind_ncqq_instance")
     async def bind_instance(
-        self, event: AstrMessageEvent, instance_name: str, nickname: str = ""
+        self, event: AstrMessageEvent, instance_names: str, nickname: str = ""
     ):
-        """将 ncqq 实例绑定给消息中被 @ 的目标用户。
+        """将一个或多个 ncqq 实例绑定给消息中被 @ 的目标用户。
 
         仅适用于管理员分配实例归属权的场景。
         必须依赖消息里的真实 @ 目标用户，不要在没有 At 组件时猜测绑定对象。
         不适用于实例启停、二维码获取、后端接入。
 
         Args:
-            instance_name (string): 要绑定给目标用户的 ncqq 实例名。
+            instance_names (string): 要绑定给目标用户的 ncqq 实例名，支持一次传入多个，用逗号分隔，例如 "bot1,bot2"。
             nickname (string): 可选昵称。若能从上下文确定目标用户称呼，可一并记录。
         """
+
+        names = [n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()]
+        if not names:
+            yield event.plain_result("未识别到有效的实例名称，请提供至少一个实例名。")
+            return
+
+        label = "、".join(names)
+
         if not event.is_admin():
             sender_id = str(event.get_sender_id())
             # Need @mention to know the target
@@ -32,19 +42,15 @@ class BackendToolsMixin:
                 action="bind_instance",
                 params={
                     "target_uid": target_uid,
-                    "instance_name": instance_name,
+                    "instance_names": names,
                     "nickname": nickname,
                 },
                 requester_qq=sender_id,
                 group_id=str(event.get_group_id() or ""),
-                description=f"绑定实例 {instance_name} → QQ {target_uid}（申请者: {sender_id}）",
+                description=f"绑定实例 {label} → QQ {target_uid}（申请者: {sender_id}）",
             )
-            admins = self.get_astrbot_admins()
-            at_parts = "".join(f"@{a} " for a in admins) if admins else "@管理员 "
             yield event.plain_result(
-                f"⚠️ 绑定实例属于高权限操作，已提交审批。\n"
-                f"审批 ID：{approval_id}\n"
-                f"请 {at_parts}回复确认（引用本条消息或说'plana 批准 {approval_id}'）。"
+                self._approval_notice_single("绑定实例", approval_id)
             )
             return
 
@@ -63,16 +69,20 @@ class BackendToolsMixin:
         if target_uid not in mapping:
             mapping[target_uid] = {"nickname": "", "instances": []}
 
-        if instance_name not in mapping[target_uid]["instances"]:
-            mapping[target_uid]["instances"].append(instance_name)
+        added: list[str] = []
+        for name in names:
+            if name not in mapping[target_uid]["instances"]:
+                mapping[target_uid]["instances"].append(name)
+                added.append(name)
 
         if nickname:
             mapping[target_uid]["nickname"] = nickname
 
         await self.save_user_mapping(mapping)
 
+        added_str = "、".join(added) if added else "（均已存在，无新增）"
         yield event.plain_result(
-            f"绑定更新成功。目标QQ: {target_uid} | 实例: {instance_name} | 昵称: {nickname or '无'}"
+            f"绑定更新成功。目标QQ: {target_uid} | 新增实例: {added_str} | 昵称: {nickname or '无'}"
         )
 
     @llm_tool(name="set_ncqq_nickname")
@@ -131,12 +141,8 @@ class BackendToolsMixin:
                 group_id=str(event.get_group_id() or ""),
                 description=f"后端端点 {action}: alias={alias}（申请者: {sender_id}）",
             )
-            admins = self.get_astrbot_admins()
-            at_parts = "".join(f"@{a} " for a in admins) if admins else "@管理员 "
             yield event.plain_result(
-                f"⚠️ 管理后端端点属于高权限操作，已提交审批。\n"
-                f"审批 ID：{approval_id}\n"
-                f"请 {at_parts}回复确认（引用本条消息或说'plana 批准 {approval_id}'）。"
+                self._approval_notice_single("管理后端端点", approval_id)
             )
             return
 
@@ -176,101 +182,85 @@ class BackendToolsMixin:
         self,
         event: AstrMessageEvent,
         backend_alias: str,
+        instance_names: str = "",
         instance_keyword: str = "",
     ):
-        """将 ncqq 实例接入指定 BotShepherd 后端端点。
+        """将一个或多个 ncqq 实例接入指定 BotShepherd 后端端点。
 
         后端已由云端统一集成，本工具只负责将雷达端点库中的指定别名注入到目标实例的
         BotShepherd connection（热重载立即生效，无需重启容器）。
-        适用场景：@某用户，给他的实例接入 gscore / astrbot / trss 等后端别名；
-        也可不 @ 用户，此时默认操作发送者自己绑定的实例。
-        若用户拥有多个实例且无法唯一定位，不要猜测，必须要求补充实例名。
+        适用场景：
+        1. 直接指定实例名（可多个）：给 xxxx、bbbb 注入 gscore；
+        2. @某用户，给他的实例接入后端（自动对该用户所有绑定实例执行）；
+        3. 不 @ 用户，默认操作发送者自己绑定的实例。
         不适用于后端端点的新增删除，也不适用于实例绑定。
 
         Args:
             backend_alias (string): 雷达端点库中的后端别名关键字，如 'gscore'、'astrbot'、'trss'。
-            instance_keyword (string): 可选实例关键字。目标用户有多个实例时应提供，用于唯一定位实例。
+            instance_names (string): 直接指定要注入的实例名，支持多个用逗号分隔，例如 "bot1,bot2"。填写时跳过用户绑定查找，直接批量注入。
+            instance_keyword (string): 通过 @用户 路径时用于从该用户的多个实例中过滤目标，仅 instance_names 为空时生效。为空时对该用户所有绑定实例全部注入。
         """
+
         sender_id = str(event.get_sender_id())
         is_admin = event.is_admin()
 
+        # --- 公共：验证 backend_alias ---
+        endpoints = await do_get_radar_endpoints(self.client)
+        matched = next(
+            (
+                e
+                for e in endpoints
+                if backend_alias.lower() in e.get("alias", "").lower()
+            ),
+            None,
+        )
+        if not matched:
+            yield event.plain_result(
+                f"雷达端点库中不存在与 '{backend_alias}' 关联的端点，"
+                f"请先通过 manage_ncqq_backends 添加。"
+            )
+            return
+        alias = matched["alias"]
+
+        # --- 路径 A：直接指定实例名 ---
+        direct_names = [
+            n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()
+        ] if instance_names.strip() else []
+
+        if direct_names:
+            if not is_admin:
+                # 非管理员走审批，为每个实例单独创建
+                ids = []
+                for n in direct_names:
+                    aid = await create_approval(
+                        self,
+                        action="inject_backend",
+                        params={"alias": alias, "instance_name": n},
+                        requester_qq=sender_id,
+                        group_id=str(event.get_group_id() or ""),
+                        description=f"接入后端 {alias} → 实例 {n}（申请者: {sender_id}）",
+                    )
+                    ids.append(aid)
+                yield event.plain_result(
+                    self._approval_notice_batch("接入后端", list(zip(direct_names, ids)))
+                )
+                return
+            results: list[str] = []
+            for n in direct_names:
+                msg = await do_inject_by_alias(
+                    self.client, alias=alias, target="bs", conn_id=n
+                )
+                results.append(f"[{n}] {msg}")
+            yield event.plain_result(
+                f"批量注入完成（后端别名: {alias}）：\n" + "\n".join(results)
+            )
+            return
+
+        # --- 路径 B：通过 @用户 / 自身 查找实例 ---
         at_users = [
             comp.qq for comp in event.message_obj.message if isinstance(comp, At)
         ]
-        if at_users:
-            target_uid = str(at_users[0])
-        else:
-            # No @mention — fall back to the sender's own instances.
-            target_uid = sender_id
-
-        # Non-admin injecting → approval required
-        if not is_admin:
-            allowed = await self.get_allowed_instances(target_uid)
-            if not allowed:
-                if at_users:
-                    yield event.plain_result(
-                        f"操作被拒绝。用户 {target_uid} 未绑定任何可操作实例，无法提交审批。"
-                    )
-                else:
-                    yield event.plain_result(
-                        "操作被拒绝。您未绑定任何可操作的 ncqq 实例，"
-                        "请联系管理员完成实例绑定后重试。"
-                    )
-                return
-            # Find endpoint first to validate alias
-            endpoints = await do_get_radar_endpoints(self.client)
-            matched = next(
-                (
-                    e
-                    for e in endpoints
-                    if backend_alias.lower() in e.get("alias", "").lower()
-                ),
-                None,
-            )
-            if not matched:
-                yield event.plain_result(
-                    f"雷达端点库中不存在与 '{backend_alias}' 关联的端点，"
-                    f"请先通过 manage_ncqq_backends 添加。"
-                )
-                return
-            # Determine target instance
-            target_instance_name = ""
-            if instance_keyword:
-                for inst in allowed:
-                    if instance_keyword.lower() in inst.lower():
-                        target_instance_name = inst
-                        break
-                if not target_instance_name:
-                    yield event.plain_result(
-                        f"实例匹配失败。用户所控实例 {allowed} 均无匹配项 ('{instance_keyword}')。"
-                    )
-                    return
-            elif len(allowed) == 1:
-                target_instance_name = allowed[0]
-            else:
-                yield event.plain_result(
-                    f"多实例冲突。该用户存在多个可用实例 {allowed}，"
-                    f"请提供 instance_keyword 以明确目标。"
-                )
-                return
-
-            alias = matched["alias"]
-            approval_id = await create_approval(
-                self,
-                action="inject_backend",
-                params={"alias": alias, "instance_name": target_instance_name},
-                requester_qq=sender_id,
-                group_id=str(event.get_group_id() or ""),
-                description=f"接入后端 {alias} → 实例 {target_instance_name}（归属: {target_uid}）",
-            )
-            admins = self.get_astrbot_admins()
-            at_parts = "".join(f"@{a} " for a in admins) if admins else "@管理员 "
-            yield event.plain_result(
-                f"⚠️ 接入后端属于高权限操作，已提交审批。\n"
-                f"审批 ID：{approval_id}\n"
-                f"请 {at_parts}回复确认（引用本条消息或说'plana 批准 {approval_id}'）。"
-            )
-            return
+        target_uid = str(at_users[0]) if at_users else sender_id
 
         allowed = await self.get_allowed_instances(target_uid)
         if not allowed:
@@ -284,51 +274,111 @@ class BackendToolsMixin:
                 )
             return
 
-        target_instance_name = ""
+        # 确定目标实例列表
         if instance_keyword:
-            for inst in allowed:
-                if instance_keyword.lower() in inst.lower():
-                    target_instance_name = inst
-                    break
-            if not target_instance_name:
+            # 模糊匹配筛选
+            targets = [
+                inst for inst in allowed
+                if instance_keyword.lower() in inst.lower()
+            ]
+            if not targets:
                 yield event.plain_result(
                     f"实例匹配失败。用户所控实例 {allowed} 均无匹配项 ('{instance_keyword}')。"
                 )
                 return
         else:
-            if len(allowed) == 1:
-                target_instance_name = allowed[0]
-            else:
-                yield event.plain_result(
-                    f"多实例冲突。该用户存在多个可用实例 {allowed}，请提供 instance_keyword 以明确目标。"
-                )
-                return
+            # 无关键字 → 对该用户所有绑定实例执行
+            targets = allowed
 
-        # 从服务端雷达端点库中按别名匹配端点
-        endpoints = await do_get_radar_endpoints(self.client)
-        matched = next(
-            (
-                e
-                for e in endpoints
-                if backend_alias.lower() in e.get("alias", "").lower()
-            ),
-            None,
-        )
-        if not matched:
+        if not is_admin:
+            # 非管理员：为每个目标实例创建审批
+            ids = []
+            for n in targets:
+                aid = await create_approval(
+                    self,
+                    action="inject_backend",
+                    params={"alias": alias, "instance_name": n},
+                    requester_qq=sender_id,
+                    group_id=str(event.get_group_id() or ""),
+                    description=f"接入后端 {alias} → 实例 {n}（归属: {target_uid}）",
+                )
+                ids.append(aid)
             yield event.plain_result(
-                f"雷达端点库中不存在与 '{backend_alias}' 关联的端点，请先通过 manage_ncqq_backends 添加。"
+                self._approval_notice_batch("接入后端", list(zip(targets, ids)))
             )
             return
 
-        alias = matched["alias"]
-        # 后端统一由 BotShepherd 集成，固定走 target="bs"，conn_id = 实例名
-        msg = await do_inject_by_alias(
-            self.client,
-            alias=alias,
-            target="bs",
-            conn_id=target_instance_name,
+        # 管理员直接执行
+        results = []
+        for n in targets:
+            msg = await do_inject_by_alias(
+                self.client, alias=alias, target="bs", conn_id=n
+            )
+            results.append(f"[{n}] {msg}")
+        yield event.plain_result(
+            f"注入完成（目标QQ: {target_uid} | 后端别名: {alias}）：\n"
+            + "\n".join(results)
         )
 
-        yield event.plain_result(
-            f"注入完成:\n目标 QQ: {target_uid}\n实例: {target_instance_name}\n后端别名: {alias}\n结果: {msg}"
-        )
+
+    @llm_tool(name="unbind_ncqq_instance")
+    async def unbind_instance(
+        self, event: AstrMessageEvent, instance_names: str
+    ):
+        """将一个或多个 ncqq 实例从消息中被 @ 的目标用户解绑。
+
+        仅管理员可用。必须依赖消息里的真实 @ 目标用户。
+        用于取消用户与实例的归属关系，不会删除实例本身。
+
+        Args:
+            instance_names (string): 要解绑的 ncqq 实例名，支持一次传入多个，用逗号分隔，例如 "bot1,bot2"。
+        """
+
+        if not event.is_admin():
+            yield event.plain_result("解绑实例仅管理员可操作。")
+            return
+
+        names = [n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()]
+        if not names:
+            yield event.plain_result("未识别到有效的实例名称，请提供至少一个实例名。")
+            return
+
+        at_users = [
+            comp.qq for comp in event.message_obj.message if isinstance(comp, At)
+        ]
+        if not at_users:
+            yield event.plain_result(
+                "缺少被操作者目标，请在对话中使用 @ 提及目标用户。"
+            )
+            return
+
+        target_uid = str(at_users[0])
+
+        mapping = await self.get_user_mapping()
+        if target_uid not in mapping or not mapping[target_uid].get("instances"):
+            yield event.plain_result(
+                f"QQ {target_uid} 当前没有任何绑定实例，无需解绑。"
+            )
+            return
+
+        current = mapping[target_uid]["instances"]
+        removed: list[str] = []
+        not_found: list[str] = []
+        for name in names:
+            if name in current:
+                current.remove(name)
+                removed.append(name)
+            else:
+                not_found.append(name)
+
+        await self.save_user_mapping(mapping)
+
+        parts: list[str] = [f"目标QQ: {target_uid}"]
+        if removed:
+            parts.append(f"已解绑: {'、'.join(removed)}")
+        if not_found:
+            parts.append(f"未找到（跳过）: {'、'.join(not_found)}")
+        remaining = current if current else ["无"]
+        parts.append(f"剩余绑定: {'、'.join(remaining)}")
+
+        yield event.plain_result("解绑完成。" + " | ".join(parts))

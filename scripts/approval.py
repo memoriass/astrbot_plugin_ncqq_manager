@@ -16,6 +16,7 @@ Each record:
 
 from __future__ import annotations
 
+import asyncio
 import random
 import string
 import time
@@ -23,6 +24,9 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..main import NCQQManagerPlugin
+
+# 全局锁：防止并发 read-modify-write 导致审批记录互相覆盖
+_approval_lock = asyncio.Lock()
 
 # Actions that require Owner approval when triggered by a non-owner.
 APPROVAL_REQUIRED_ACTIONS: set[str] = {
@@ -53,32 +57,33 @@ async def create_approval(
     description: str,
 ) -> str:
     """Persist a pending approval and return the approval_id."""
-    approvals = await plugin.get_pending_approvals()
+    async with _approval_lock:
+        approvals = await plugin.get_pending_approvals()
 
-    # Purge expired entries first.
-    now = time.time()
-    approvals = {
-        k: v
-        for k, v in approvals.items()
-        if now - v.get("created_at", 0) < APPROVAL_TTL
-    }
+        # Purge expired entries first.
+        now = time.time()
+        approvals = {
+            k: v
+            for k, v in approvals.items()
+            if now - v.get("created_at", 0) < APPROVAL_TTL
+        }
 
-    # Collision-free ID generation.
-    approval_id = _gen_approval_id()
-    while approval_id in approvals:
+        # Collision-free ID generation.
         approval_id = _gen_approval_id()
+        while approval_id in approvals:
+            approval_id = _gen_approval_id()
 
-    approvals[approval_id] = {
-        "approval_id": approval_id,
-        "action": action,
-        "params": params,
-        "requester_qq": requester_qq,
-        "group_id": group_id,
-        "description": description,
-        "created_at": now,
-    }
-    await plugin.save_pending_approvals(approvals)
-    return approval_id
+        approvals[approval_id] = {
+            "approval_id": approval_id,
+            "action": action,
+            "params": params,
+            "requester_qq": requester_qq,
+            "group_id": group_id,
+            "description": description,
+            "created_at": now,
+        }
+        await plugin.save_pending_approvals(approvals)
+        return approval_id
 
 
 async def get_approval(plugin: "NCQQManagerPlugin", approval_id: str) -> dict | None:
@@ -94,9 +99,10 @@ async def get_approval(plugin: "NCQQManagerPlugin", approval_id: str) -> dict | 
 
 async def remove_approval(plugin: "NCQQManagerPlugin", approval_id: str) -> None:
     """Delete a pending approval record."""
-    approvals = await plugin.get_pending_approvals()
-    approvals.pop(approval_id, None)
-    await plugin.save_pending_approvals(approvals)
+    async with _approval_lock:
+        approvals = await plugin.get_pending_approvals()
+        approvals.pop(approval_id, None)
+        await plugin.save_pending_approvals(approvals)
 
 
 async def list_approvals(plugin: "NCQQManagerPlugin") -> list[dict]:

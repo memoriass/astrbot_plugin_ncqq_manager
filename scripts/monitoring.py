@@ -1,6 +1,10 @@
 import json
+import logging
+from urllib.parse import quote
 
 from .api import NCQQClient
+
+logger = logging.getLogger(__name__)
 
 
 async def do_list_instances(
@@ -19,7 +23,8 @@ async def do_list_instances(
 
         return containers
     except Exception as e:
-        return f"发生网络或配置错误: {e}"
+        logger.warning("列出实例失败: %s", e)
+        return "网络或配置错误，请稍后重试。"
 
 
 async def do_list_assets(client: NCQQClient) -> str:
@@ -36,7 +41,8 @@ async def do_list_assets(client: NCQQClient) -> str:
             f"【集群节点】:\n{json.dumps(nodes, ensure_ascii=False)}"
         )
     except Exception as e:
-        return f"资产拉取失败: {e}"
+        logger.warning("资产拉取失败: %s", e)
+        return "资产拉取失败，请稍后重试。"
 
 
 async def do_list_files(client: NCQQClient, instance_name: str, path: str = "") -> str:
@@ -44,7 +50,7 @@ async def do_list_files(client: NCQQClient, instance_name: str, path: str = "") 
     try:
         url = f"/api/containers/{instance_name}/files"
         if path:
-            url += f"?path={path}"
+            url += f"?path={quote(path, safe='/')}"
         res = await client.make_request("GET", url)
         files = res.get("files", []) if isinstance(res, dict) else []
         folders = res.get("folders", []) if isinstance(res, dict) else []
@@ -55,7 +61,8 @@ async def do_list_files(client: NCQQClient, instance_name: str, path: str = "") 
             f"【文件】: {json.dumps([{'name': f['name'], 'size': f.get('size', 0)} for f in files], ensure_ascii=False)}"
         )
     except Exception as e:
-        return f"文件列表获取失败: {e}"
+        logger.warning("文件列表获取失败 %s: %s", instance_name, e)
+        return "文件列表获取失败，请稍后重试。"
 
 
 async def do_get_radar_endpoints(client: NCQQClient) -> list:
@@ -80,7 +87,8 @@ async def do_save_radar_endpoints(client: NCQQClient, endpoints: list) -> str:
         )
         return f"雷达端点库已更新，共 {count} 条记录。"
     except Exception as e:
-        return f"端点库保存失败: {e}"
+        logger.warning("端点库保存失败: %s", e)
+        return "端点库保存失败，请稍后重试。"
 
 
 async def do_get_monitor(
@@ -99,4 +107,5 @@ async def do_get_monitor(
             )
             return f"Docker底层性能数据：\n{json.dumps(res, ensure_ascii=False)}"
     except Exception as e:
-        return f"监控调用失败: {e}"
+        logger.warning("监控调用失败 %s: %s", instance_name, e)
+        return "监控调用失败，请稍后重试。"
