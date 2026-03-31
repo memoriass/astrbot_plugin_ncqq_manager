@@ -28,15 +28,15 @@ class AdminToolsMixin:
         仅 AstrBot 管理员可查看。适用于管理员集中处理积压的审批任务。
         """
         if not event.is_admin():
-            yield event.plain_result("权限不足。仅限管理员查看待审批列表。")
+            yield event.plain_result("此功能仅限管理员查看待审批请求。")
             return
 
         records = await list_approvals(self)
         if not records:
-            yield event.plain_result("当前无待审批请求。")
+            yield event.plain_result("当前没有待处理的审批请求。")
             return
 
-        lines = ["📋 待审批操作列表："]
+        lines = ["待审批请求列表："]
         for r in records:
             age_min = int((time.time() - r.get("created_at", 0)) / 60)
             lines.append(
@@ -57,19 +57,19 @@ class AdminToolsMixin:
             approval_id (string): 六位审批 ID，如 'AB12CD'。
         """
         if not event.is_admin():
-            yield event.plain_result("权限不足。仅限管理员批准审批请求。")
+            yield event.plain_result("此功能仅限管理员处理审批请求。")
             return
 
         approval_id = approval_id.strip().upper()
         record = await get_approval(self, approval_id)
         if not record:
             yield event.plain_result(
-                f"未找到审批 ID [{approval_id}] 的有效请求（可能已过期或不存在）。"
+                f"未找到编号为 [{approval_id}] 的审批请求，可能已处理或已过期。"
             )
             return
 
         yield event.plain_result(
-            f"⚙️ 正在以 Owner 权限执行审批 [{approval_id}]：{record['description']}"
+            f"开始处理审批 [{approval_id}]：{record['description']}"
         )
 
         action = record["action"]
@@ -77,7 +77,9 @@ class AdminToolsMixin:
         result_msg = await self._dispatch_approved_action(action, params)
 
         await remove_approval(self, approval_id)
-        yield event.plain_result(f"✅ 审批 [{approval_id}] 执行完毕：\n{result_msg}")
+        yield event.plain_result(
+            f"审批 [{approval_id}] 已处理完成。\n{result_msg}"
+        )
 
     @llm_tool(name="reject_ncqq_request")
     async def reject_request(
@@ -92,17 +94,19 @@ class AdminToolsMixin:
             reason (string): 可选拒绝原因，将反馈给申请者。
         """
         if not event.is_admin():
-            yield event.plain_result("权限不足。仅限管理员拒绝审批请求。")
+            yield event.plain_result("此功能仅限管理员拒绝审批请求。")
             return
 
         approval_id = approval_id.strip().upper()
         record = await get_approval(self, approval_id)
         if not record:
-            yield event.plain_result(f"未找到审批 ID [{approval_id}] 的有效请求。")
+            yield event.plain_result(
+                f"未找到编号为 [{approval_id}] 的审批请求，可能已处理或已过期。"
+            )
             return
 
         await remove_approval(self, approval_id)
-        msg = f"❌ 审批 [{approval_id}] 已拒绝：{record['description']}"
+        msg = f"审批 [{approval_id}] 已拒绝：{record['description']}"
         if reason:
             msg += f"\n拒绝原因：{reason}"
         yield event.plain_result(msg)
@@ -124,11 +128,11 @@ class AdminToolsMixin:
         }
         handler = handlers.get(action)
         if handler is None:
-            return f"未知操作类型 '{action}'，请联系开发者。"
+            return f"暂不支持处理该审批类型：{action}。请联系管理员检查配置。"
         try:
             return await handler(params)
-        except Exception as e:
-            return f"执行失败: {e}"
+        except Exception:
+            return "审批执行过程中出现异常，请稍后重试或检查后台日志。"
 
     # --- 以下为各 action 的具体处理方法 ---
 
@@ -141,7 +145,7 @@ class AdminToolsMixin:
             delete_data=params.get("delete_data", False),
         )
         # 删除成功后自动清理 user_mapping 中对该实例的残留引用
-        if "成功" in result:
+        if "失败" not in result:
             mapping = await self.get_user_mapping()
             changed = False
             for uid, data in mapping.items():
@@ -213,11 +217,11 @@ class AdminToolsMixin:
         else:
             endpoints.append({"alias": alias, "url": url, "token": token})
         result = await do_save_radar_endpoints(self.client, endpoints)
-        return f"端点已添加/更新: alias={alias} url={url}  {result}"
+        return f"后端端点 {alias} 已保存。{result}"
 
     async def _handle_manage_backends_remove(self, params: dict) -> str:
         endpoints = await do_get_radar_endpoints(self.client)
         alias = params["alias"]
         new_endpoints = [e for e in endpoints if e.get("alias") != alias]
         result = await do_save_radar_endpoints(self.client, new_endpoints)
-        return f"端点已删除: alias={alias}  {result}"
+        return f"后端端点 {alias} 已删除。{result}"

@@ -25,7 +25,7 @@ class BackendToolsMixin:
 
         names = [n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()]
         if not names:
-            yield event.plain_result("未识别到有效的实例名称，请提供至少一个实例名。")
+            yield event.plain_result("没有识别到可绑定的实例名，请至少提供一个实例名。")
             return
 
         label = "、".join(names)
@@ -80,9 +80,10 @@ class BackendToolsMixin:
 
         await self.save_user_mapping(mapping)
 
-        added_str = "、".join(added) if added else "（均已存在，无新增）"
+        added_str = "、".join(added) if added else "本次没有新增实例"
+        nickname_text = nickname or "未设置"
         yield event.plain_result(
-            f"绑定更新成功。目标QQ: {target_uid} | 新增实例: {added_str} | 昵称: {nickname or '无'}"
+            f"已完成绑定更新：目标用户 {target_uid}；新增实例：{added_str}；昵称：{nickname_text}。"
         )
 
     @llm_tool(name="set_ncqq_nickname")
@@ -99,7 +100,7 @@ class BackendToolsMixin:
             nickname (string): 要保存的昵称。
         """
         if not event.is_admin():
-            yield event.plain_result("权限不足。仅限管理员修改昵称。")
+            yield event.plain_result("此功能仅限管理员修改昵称。")
             return
         mapping = await self.get_user_mapping()
 
@@ -108,7 +109,7 @@ class BackendToolsMixin:
 
         mapping[qq_id]["nickname"] = nickname
         await self.save_user_mapping(mapping)
-        yield event.plain_result(f"昵称设置完毕。QQ {qq_id} -> {nickname}。")
+        yield event.plain_result(f"昵称已更新：{nickname}（QQ {qq_id}）。")
 
     @llm_tool(name="manage_ncqq_backends")
     async def manage_backends(
@@ -139,7 +140,7 @@ class BackendToolsMixin:
                 params={"alias": alias, "url": url, "token": token},
                 requester_qq=sender_id,
                 group_id=str(event.get_group_id() or ""),
-                description=f"后端端点 {action}: alias={alias}（申请者: {sender_id}）",
+                description=f"后端端点{action}：{alias}（申请者: {sender_id}）",
             )
             yield event.plain_result(
                 self._approval_notice_single("管理后端端点", approval_id)
@@ -150,7 +151,7 @@ class BackendToolsMixin:
 
         if action == "add":
             if not url:
-                yield event.plain_result("添加失败。缺乏 url 参数。")
+                yield event.plain_result("添加失败，请补充后端地址。")
                 return
             # 已存在则更新，否则追加
             existing = next((e for e in endpoints if e.get("alias") == alias), None)
@@ -160,21 +161,19 @@ class BackendToolsMixin:
             else:
                 endpoints.append({"alias": alias, "url": url, "token": token})
             result = await do_save_radar_endpoints(self.client, endpoints)
-            yield event.plain_result(
-                f"端点已添加/更新: alias={alias} url={url}  {result}"
-            )
+            yield event.plain_result(f"后端端点 {alias} 已保存。{result}")
 
         elif action == "remove":
             new_endpoints = [e for e in endpoints if e.get("alias") != alias]
             if len(new_endpoints) == len(endpoints):
-                yield event.plain_result(f"未找到别名为 '{alias}' 的端点，无法删除。")
+                yield event.plain_result(f"未找到名为 {alias} 的后端端点，暂未执行删除。")
                 return
             result = await do_save_radar_endpoints(self.client, new_endpoints)
-            yield event.plain_result(f"端点已删除: alias={alias}  {result}")
+            yield event.plain_result(f"后端端点 {alias} 已删除。{result}")
 
         else:
             yield event.plain_result(
-                f"不支持的 action='{action}'，仅支持 add 或 remove。"
+                f"不支持该操作：{action}。目前仅支持 add 或 remove。"
             )
 
     @llm_tool(name="inject_backend_to_instance")
@@ -216,8 +215,7 @@ class BackendToolsMixin:
         )
         if not matched:
             yield event.plain_result(
-                f"雷达端点库中不存在与 '{backend_alias}' 关联的端点，"
-                f"请先通过 manage_ncqq_backends 添加。"
+                f"未找到名为 {backend_alias} 的后端端点，请先让管理员完成配置。"
             )
             return
         alias = matched["alias"]
@@ -252,7 +250,7 @@ class BackendToolsMixin:
                 )
                 results.append(f"[{n}] {msg}")
             yield event.plain_result(
-                f"批量注入完成（后端别名: {alias}）：\n" + "\n".join(results)
+                f"已为后端端点 {alias} 完成批量接入：\n" + "\n".join(results)
             )
             return
 
@@ -266,11 +264,11 @@ class BackendToolsMixin:
         if not allowed:
             if at_users:
                 yield event.plain_result(
-                    f"执行失败。用户 {target_uid} 未绑定可操作的实例。"
+                    f"用户 {target_uid} 当前没有可操作的实例。"
                 )
             else:
                 yield event.plain_result(
-                    "执行失败。您未绑定任何可操作的 ncqq 实例。请联系管理员执行绑定后重试。"
+                    "你当前还没有可操作的实例，请先联系管理员完成绑定。"
                 )
             return
 
@@ -283,7 +281,7 @@ class BackendToolsMixin:
             ]
             if not targets:
                 yield event.plain_result(
-                    f"实例匹配失败。用户所控实例 {allowed} 均无匹配项 ('{instance_keyword}')。"
+                    f"在该用户的实例中没有找到与“{instance_keyword}”对应的结果，请补充更准确的实例名。"
                 )
                 return
         else:
@@ -316,8 +314,7 @@ class BackendToolsMixin:
             )
             results.append(f"[{n}] {msg}")
         yield event.plain_result(
-            f"注入完成（目标QQ: {target_uid} | 后端别名: {alias}）：\n"
-            + "\n".join(results)
+            f"已为用户 {target_uid} 完成后端接入：\n" + "\n".join(results)
         )
 
 
@@ -340,7 +337,7 @@ class BackendToolsMixin:
 
         names = [n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()]
         if not names:
-            yield event.plain_result("未识别到有效的实例名称，请提供至少一个实例名。")
+            yield event.plain_result("没有识别到可解绑的实例名，请至少提供一个实例名。")
             return
 
         at_users = [
@@ -357,7 +354,7 @@ class BackendToolsMixin:
         mapping = await self.get_user_mapping()
         if target_uid not in mapping or not mapping[target_uid].get("instances"):
             yield event.plain_result(
-                f"QQ {target_uid} 当前没有任何绑定实例，无需解绑。"
+                f"用户 {target_uid} 当前没有已绑定的实例，无需解绑。"
             )
             return
 
@@ -373,12 +370,12 @@ class BackendToolsMixin:
 
         await self.save_user_mapping(mapping)
 
-        parts: list[str] = [f"目标QQ: {target_uid}"]
+        parts: list[str] = [f"目标用户：{target_uid}"]
         if removed:
-            parts.append(f"已解绑: {'、'.join(removed)}")
+            parts.append(f"已解绑：{'、'.join(removed)}")
         if not_found:
-            parts.append(f"未找到（跳过）: {'、'.join(not_found)}")
+            parts.append(f"未找到并已跳过：{'、'.join(not_found)}")
         remaining = current if current else ["无"]
-        parts.append(f"剩余绑定: {'、'.join(remaining)}")
+        parts.append(f"剩余绑定：{'、'.join(remaining)}")
 
-        yield event.plain_result("解绑完成。" + " | ".join(parts))
+        yield event.plain_result("解绑已完成。" + "；".join(parts))

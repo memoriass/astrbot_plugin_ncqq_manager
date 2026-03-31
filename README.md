@@ -10,6 +10,8 @@
 3. **⚡ 智能中间件注入雷达 (Injection Engine)**
    无需人工修改配置文件，你可以对 AI 下令：“给 @老李 的机器对接原神”。
    底层的强力雷达会自动推断这台机器是处于 **BS原生中间件集群 (BotShepherd)** 状态还是 **单体 WS 直流状态**，并向目标端口智能发包覆写，实现零延时的多业务热切！
+4. **📡 已对接 ncqq-manager SSE / 最近事件感知**
+   监控信息会读取 `/api/containers/{name}/stats` 返回的 `last_event`，展示最近一次容器生命周期事件；执行 start/stop/restart/delete 等动作后，插件会短暂订阅 `/api/containers/{name}/events` 进行 SSE 确认，无需常驻长连接。
 
 ## ⚙️ 安装与配置
 1. 将本文件夹完整放至 `AstrBot/data/plugins/` 目录中。

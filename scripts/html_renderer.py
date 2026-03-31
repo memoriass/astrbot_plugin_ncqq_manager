@@ -261,17 +261,25 @@ async def _ensure_browser():
     try:
         from playwright.async_api import async_playwright  # type: ignore
     except ImportError:
-        logger.warning("playwright 未安装，HTML 卡片渲染不可用，将回退纯文本")
+        logger.warning(
+            "playwright 未安装，HTML 卡片渲染不可用，将回退纯文本。"
+            "请执行: pip install playwright && playwright install chromium"
+        )
         return None
     try:
         _playwright_instance = await async_playwright().start()
         _browser_instance = await _playwright_instance.chromium.launch(
-            args=["--no-sandbox", "--disable-dev-shm-usage"]
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
         )
         logger.info("playwright browser launched (reusable)")
         return _browser_instance
     except Exception as e:
-        logger.warning("playwright browser launch failed: %s", e)
+        logger.warning(
+            "playwright browser launch failed: %s — "
+            "如在 Docker/Linux 环境，请确认已执行 "
+            "'playwright install --with-deps chromium'",
+            e,
+        )
         return None
 
 
@@ -316,7 +324,9 @@ async def _screenshot_html(html: str, viewport_width: int = 560) -> bytes | None
             tmp_path = f.name
 
         page = await browser.new_page(viewport={"width": viewport_width, "height": 800})
-        await page.goto(f"file://{tmp_path}")
+        # 使用 pathlib.as_uri() 确保跨平台 file:// URI 正确性
+        file_uri = pathlib.Path(tmp_path).resolve().as_uri()
+        await page.goto(file_uri)
         await page.wait_for_load_state("networkidle")
         # 等待外部头像图片加载完毕（qlogo URL 等）
         try:

@@ -20,7 +20,7 @@ async def do_check_login_status(client: NCQQClient, instance_name: str) -> dict:
         return res if isinstance(res, dict) else {"status": "ok", "logged_in": False}
     except Exception as e:
         logger.warning("刷新登录状态 %s 失败: %s", instance_name, e)
-        return {"status": "error", "logged_in": False, "msg": "接口故障，请稍后重试。"}
+        return {"status": "error", "logged_in": False, "msg": "登录状态查询失败，请稍后重试。"}
 
 
 def is_qrcode_available_status(status_payload: dict) -> tuple[bool, str]:
@@ -57,20 +57,19 @@ async def do_get_qrcode(client: NCQQClient, instance_name: str) -> list:
             "GET", f"/api/containers/{instance_name}/qrcode"
         )
         if not isinstance(res, dict):
-            return [f"接口返回格式异常：{res}"]
+            return ["二维码接口返回异常，暂时无法解析，请稍后重试。"]
 
         status = str(res.get("status", "")).lower().strip()
 
         if status == "logged_in":
             uin = res.get("uin", "")
-            return [f"实例已登录（QQ: {uin}），无需扫码。"]
+            return [f"实例已登录（账号：{uin}），无需扫码。"]
 
         if status == "waiting":
             return ["容器尚未就绪或正在启动中，暂时无法获取二维码，请稍后重试。"]
 
         if status == "ok":
             url: str = res.get("url", "")
-            qr_type: str = res.get("type", "")
             if url.startswith("data:image"):
                 # Inline base64 image (type=="file")
                 b64_data = url.split(",", 1)[1] if "," in url else url
@@ -84,9 +83,9 @@ async def do_get_qrcode(client: NCQQClient, instance_name: str) -> list:
                     Image.fromURL(url),
                     "从容器日志中提取到二维码地址，请尽快扫码登录。",
                 ]
-            return [f"二维码获取成功，但 URL 格式未识别：{url!r}（type={qr_type}）"]
+            return ["二维码已生成，但当前返回格式暂不支持直接展示，请联系管理员检查后端配置。"]
 
-        return [f"接口返回未知状态：{res}"]
+        return ["当前无法获取二维码，请稍后重试。"]
     except Exception as e:
         logger.warning("获取二维码 %s 失败: %s", instance_name, e)
         return ["接口调用异常，请稍后重试。"]

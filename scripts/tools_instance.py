@@ -1,5 +1,4 @@
 import base64
-import json
 import re
 
 from astrbot.api.all import AstrMessageEvent, Image, llm_tool
@@ -13,16 +12,33 @@ from .interaction import (
     do_get_qrcode,
     is_qrcode_available_status,
 )
-from .monitoring import do_get_monitor, do_list_assets, do_list_files, do_list_instances
+from .monitoring import (
+    do_confirm_instance_action,
+    do_get_monitor,
+    do_list_assets,
+    do_list_files,
+    do_list_instances,
+)
 
 
 class InstanceToolsMixin:
+    _ACTION_EVENT_MAP = {
+        "start": ["start"],
+        "stop": ["stop", "die"],
+        "restart": ["restart", "start"],
+        "pause": ["pause"],
+        "unpause": ["unpause", "start"],
+        "kill": ["kill", "die"],
+        "delete": ["destroy", "die"],
+    }
+
     @llm_tool(name="list_ncqq_instances")
     async def list_instances(self, event: AstrMessageEvent):
         """列出 ncqq 管理器中的实例状态列表。
 
         适用于用户询问实例清单、运行状态、归属信息、在线情况时。
-        不适用于执行启停、删除、二维码获取、配置写入。
+        不适用于执行启停、删除、配置写入。
+        注意：如果用户请求"获取二维码""拉二维码""扫码"，不要调用此工具，应调用 get_ncqq_qrcode。
         """
         sender_id = str(event.get_sender_id())
         is_admin = event.is_admin()
@@ -36,29 +52,22 @@ class InstanceToolsMixin:
             yield event.plain_result(result)
             return
 
-        # Attach nickname mapping as a hidden prefix for LLM context
         mapping = await self.get_user_mapping()
-        nicknames_dict = {
-            qq: data.get("nickname", qq)
-            for qq, data in mapping.items()
-            if data.get("nickname")
-        }
+        nickname_count = sum(1 for data in mapping.values() if data.get("nickname"))
 
         rendered = await render_instances(result)
 
         if isinstance(rendered, bytes):
-            # Playwright produced a PNG — send as image
             b64 = base64.b64encode(rendered).decode()
             yield event.chain_result([Image.fromBase64(b64)])
-            # Still append LLM-friendly nickname hint as a follow-up text
-            if nicknames_dict:
-                hint = f"[昵称对照: {json.dumps(nicknames_dict, ensure_ascii=False)}]"
-                yield event.plain_result(hint)
+            if nickname_count:
+                yield event.plain_result(f"（含 {nickname_count} 条昵称记录）")
         else:
-            # Plain-text fallback
-            prefix = ""
-            if nicknames_dict:
-                prefix = f"[昵称对照: {json.dumps(nicknames_dict, ensure_ascii=False)}]\n"
+            prefix = (
+                f"（含 {nickname_count} 条昵称记录）\n"
+                if nickname_count
+                else ""
+            )
             yield event.plain_result(prefix + rendered)
 
     @llm_tool(name="ncqq_instance_action")
@@ -73,6 +82,7 @@ class InstanceToolsMixin:
 
         仅在用户明确表达 start、stop、restart、pause、unpause、kill、delete 这类动作意图时调用。
         不要把查看状态、获取二维码、查询配置误判为实例动作。
+        注意：如果用户请求"获取二维码""拉二维码""扫码"，不要调用此工具，应调用 get_ncqq_qrcode。
 
         Args:
             instance_names (string): 要操作的 ncqq 实例名，支持一次传入多个，用逗号分隔，例如 "bot1,bot2"。必须是明确的实例标识，不是用户昵称。
@@ -82,7 +92,7 @@ class InstanceToolsMixin:
 
         names = [n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()]
         if not names:
-            yield event.plain_result("未识别到有效的实例名称，请提供至少一个实例名。")
+            yield event.plain_result("没有识别到可操作的实例名，请至少提供一个实例名。")
             return
 
         sender_id = str(event.get_sender_id())
@@ -95,8 +105,7 @@ class InstanceToolsMixin:
                 rejected = [n for n in names if n not in allowed]
                 if rejected:
                     yield event.plain_result(
-                        f"操作被拒绝。实例 {'、'.join(rejected)} 不在您的绑定列表中，"
-                        "无法申请销毁。请联系管理员直接操作。"
+                        f"以下实例不在你的可操作范围内：{'、'.join(rejected)}。如需删除，请联系管理员处理。"
                     )
                     return
                 # 为每个实例单独创建审批记录
@@ -122,9 +131,16 @@ class InstanceToolsMixin:
                 msg = await do_instance_action(
                     self.client, n, action, delete_data=delete_data
                 )
+                if "失败" not in msg:
+                    confirm = await do_confirm_instance_action(
+                        self.client,
+                        n,
+                        self._ACTION_EVENT_MAP.get(action, [action]),
+                    )
+                    msg = f"{msg}\n{confirm}"
                 results.append(msg)
                 # 删除成功后自动清理 user_mapping 中对该实例的残留引用
-                if "成功" in msg:
+                if "失败" not in msg:
                     cleaned.append(n)
             if cleaned:
                 mapping = await self.get_user_mapping()
@@ -147,25 +163,32 @@ class InstanceToolsMixin:
             rejected = [n for n in names if n not in allowed]
             if rejected:
                 yield event.plain_result(
-                    f"操作被拒绝。实例 {'、'.join(rejected)} 不在您的绑定列表中，"
-                    "请联系管理员先完成实例绑定。"
+                    f"以下实例暂时不能由你操作：{'、'.join(rejected)}。请先联系管理员完成绑定。"
                 )
                 return
 
         results = []
         for n in names:
             msg = await do_instance_action(self.client, n, action)
+            if "失败" not in msg:
+                confirm = await do_confirm_instance_action(
+                    self.client,
+                    n,
+                    self._ACTION_EVENT_MAP.get(action, [action]),
+                )
+                msg = f"{msg}\n{confirm}"
             results.append(msg)
         yield event.plain_result("\n".join(results))
 
     @llm_tool(name="get_ncqq_qrcode")
     async def get_qrcode(self, event: AstrMessageEvent, instance_name: str = ""):
-        """获取 ncqq 管理器中实例的登录二维码。
+        """获取 ncqq 实例的登录二维码图片。
 
-        仅适用于掉线、待登录、待扫码、需要重新登录的实例。
-        若消息中 @ 了某个用户，应优先从该用户已绑定实例中定位目标；只有候选实例唯一时才自动选择。
+        用户说"获取二维码""拉二维码""帮XX扫码""帮@用户获取二维码""给XX拉个码"
+        等任何包含"二维码""扫码""登录码"关键词的请求时，必须直接调用此工具。
+        本工具内部会自动检查实例是否需要扫码，无需先调用 check_login_status 或 list_instances。
+        若消息中 @ 了某个用户，优先从该用户绑定实例中定位目标；候选唯一时自动选择。
         当存在多个候选实例时，不要猜测，必须要求用户补充实例名。
-        不应用于已经在线、状态正常、无需重新登录的实例。
 
         Args:
             instance_name (string): 目标 ncqq 实例名。可为空；当消息里包含 @目标用户 且可唯一定位实例时允许省略。
@@ -177,12 +200,12 @@ class InstanceToolsMixin:
         if target_user_id:
             if not is_admin:
                 yield event.plain_result(
-                    "权限不足。仅管理员可按 @用户 维度代查二维码。"
+                    "只有管理员才可以通过 @用户 的方式代为获取二维码。"
                 )
                 return
             candidate_instances = await self.get_instances_for_user(target_user_id)
             if not candidate_instances:
-                yield event.plain_result("目标用户未绑定任何 ncqq 实例。")
+                yield event.plain_result("目标用户当前还没有绑定可用实例。")
                 return
         else:
             candidate_instances = await self.get_allowed_instances(sender_id)
@@ -200,12 +223,12 @@ class InstanceToolsMixin:
                 target_instance_name = matched[0]
             elif len(matched) > 1:
                 yield event.plain_result(
-                    f"实例名匹配到多个结果 {matched}，请提供更精确的实例名。"
+                    f"实例名匹配到多个候选：{'、'.join(matched)}。请补充更完整的实例名。"
                 )
                 return
             else:
                 yield event.plain_result(
-                    f"目标用户绑定实例 {candidate_instances} 中未找到匹配项: {target_instance_name}。"
+                    f"未在该用户的实例中找到与“{target_instance_name}”对应的结果，请确认实例名后重试。"
                 )
                 return
 
@@ -222,12 +245,9 @@ class InstanceToolsMixin:
             if len(eligible_instances) == 1:
                 target_instance_name = eligible_instances[0][0]
             elif len(eligible_instances) > 1:
-                summary = [
-                    f"{name}({status or 'unknown'})"
-                    for name, status, _ in eligible_instances
-                ]
+                summary = [name for name, _, _ in eligible_instances]
                 yield event.plain_result(
-                    f"目标用户存在多个可拉取二维码的实例: {summary}。请补充实例名避免误识别。"
+                    f"目标用户有多个实例都可能需要扫码：{'、'.join(summary)}。请补充实例名后再试。"
                 )
                 return
             else:
@@ -238,21 +258,20 @@ class InstanceToolsMixin:
 
         if not target_instance_name:
             yield event.plain_result(
-                "请明确提供 instance_name，或在消息中 @目标用户 让我自动定位实例。"
+                "请直接提供实例名；如果你是管理员，也可以在消息中 @目标用户 让我帮你定位实例。"
             )
             return
 
         if not is_admin and not target_user_id:
             if target_instance_name not in candidate_instances:
-                yield event.plain_result("越权。操作目标非您绑定下辖的实例。")
+                yield event.plain_result("该实例不在你的可操作范围内，请确认实例名或联系管理员。")
                 return
 
         status_payload = await do_check_login_status(self.client, target_instance_name)
         available, reason = is_qrcode_available_status(status_payload)
         if not available:
-            status = status_payload.get("status", "unknown")
             yield event.plain_result(
-                f"当前实例不适合拉取二维码。instance={target_instance_name} status={status} msg={reason or '无'}"
+                f"实例 {target_instance_name} 当前不需要重新扫码。{reason or '如仍有异常，请稍后再检查登录状态。'}"
             )
             return
 
@@ -268,7 +287,8 @@ class InstanceToolsMixin:
         """刷新并检查 ncqq 实例的实时登录状态，支持一次检查多个实例。
 
         适用于用户询问某实例是否在线、是否掉线、是否扫码成功、是否仍需登录时。
-        此工具只返回状态信息，不返回二维码图片。
+        此工具只返回状态文字信息，不返回二维码图片。
+        注意：如果用户请求"获取二维码""拉二维码""扫码"，不要调用此工具，应调用 get_ncqq_qrcode。
 
         Args:
             instance_names (string): 要检查登录状态的 ncqq 实例名，支持一次传入多个，用逗号分隔，例如 "bot1,bot2"。
@@ -276,7 +296,7 @@ class InstanceToolsMixin:
 
         names = [n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()]
         if not names:
-            yield event.plain_result("未识别到有效的实例名称，请提供至少一个实例名。")
+            yield event.plain_result("没有识别到可操作的实例名，请至少提供一个实例名。")
             return
 
         sender_id = str(event.get_sender_id())
@@ -287,7 +307,7 @@ class InstanceToolsMixin:
             rejected = [n for n in names if n not in allowed]
             if rejected:
                 yield event.plain_result(
-                    f"越权拦截。实例 {'、'.join(rejected)} 不在您的绑定列表中。"
+                    f"你暂时不能查看这些实例的登录状态：{'、'.join(rejected)}。"
                 )
                 return
 
@@ -297,15 +317,13 @@ class InstanceToolsMixin:
             logged_in = payload.get("logged_in", False)
             uin = payload.get("uin", "")
             nickname = payload.get("nickname", "")
-            method = payload.get("method", "")
-            err_msg = payload.get("msg", "")
             if payload.get("status") == "error":
-                status_text = f"接口故障：{err_msg}"
+                status_text = "登录状态暂时获取失败，请稍后重试。"
             elif logged_in:
-                label = f"{nickname}({uin})" if uin else uin or "未知"
-                status_text = f"在线 ✅  账号：{label}  检测方式：{method}"
+                label = f"{nickname}({uin})" if uin else nickname or "已登录"
+                status_text = f"已在线，当前账号：{label}"
             else:
-                status_text = "离线 / 未登录 ⚠️"
+                status_text = "当前未登录，可能需要重新扫码。"
             lines.append(f"[{name}] 登录状态：{status_text}")
         yield event.plain_result("\n".join(lines))
 
@@ -323,7 +341,7 @@ class InstanceToolsMixin:
             fetch_logs (boolean): 为 true 时返回尾部日志；为 false 时返回监控摘要。
         """
         if not event.is_admin():
-            yield event.plain_result("权限不足。仅限管理员执行性能监测日志。")
+            yield event.plain_result("此功能仅限管理员查看监控与日志。")
             return
 
         msg = await do_get_monitor(self.client, instance_name, fetch_logs)
@@ -343,7 +361,7 @@ class InstanceToolsMixin:
 
         names = [n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()]
         if not names:
-            yield event.plain_result("未识别到有效的实例名称，请提供至少一个实例名。")
+            yield event.plain_result("没有识别到可操作的实例名，请至少提供一个实例名。")
             return
 
         if not event.is_admin():
@@ -376,7 +394,7 @@ class InstanceToolsMixin:
         不适用于具体实例状态、二维码、后端接入。
         """
         if not event.is_admin():
-            yield event.plain_result("权限拦截。")
+            yield event.plain_result("此功能仅限管理员使用。")
             return
 
         msg = await do_list_assets(self.client)
@@ -399,7 +417,7 @@ class InstanceToolsMixin:
             file_name (string): 容器内要读取的文件名。默认值为 onebot11_uin.json。
         """
         if not event.is_admin():
-            yield event.plain_result("权限拦截。")
+            yield event.plain_result("此功能仅限管理员使用。")
             return
 
         msg = await do_read_config(self.client, instance_name, file_name)
@@ -430,8 +448,7 @@ class InstanceToolsMixin:
             allowed = await self.get_allowed_instances(sender_id)
             if instance_name not in allowed:
                 yield event.plain_result(
-                    f"操作被拒绝。实例 {instance_name} 不在您的绑定列表中，"
-                    "无法申请覆写配置。请联系管理员先完成实例绑定。"
+                    f"实例 {instance_name} 当前不在你的可操作范围内，暂时不能提交配置修改申请。"
                 )
                 return
             approval_id = await create_approval(
@@ -471,7 +488,7 @@ class InstanceToolsMixin:
             path (string): 相对于实例数据根目录的路径，留空表示根目录。例如 'config' 或 'qq_data'。
         """
         if not event.is_admin():
-            yield event.plain_result("权限拦截。")
+            yield event.plain_result("此功能仅限管理员使用。")
             return
 
         msg = await do_list_files(self.client, instance_name, path)
