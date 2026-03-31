@@ -153,6 +153,18 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsM
 
         text = event.message_str.strip().upper()
         matches = re.findall(r"\b([A-Z0-9]{6})\b", text)
+
+        # 检查是否是拒绝操作
+        is_reject = bool(re.search(r"拒绝|不|驳回|取消|REJECT|NO|CANCEL", text))
+
+        # 允许管理员仅回复“同意/批准”等词，自动从引用的消息体中提取审批 ID
+        if not matches and (is_reject or re.search(r"同意|批准|通过|确认|APPROVE|YES|OK|PLANA", text)):
+            quoted_text = getattr(reply_comp, "message_str", "") or getattr(reply_comp, "text", "")
+            if quoted_text:
+                matches = re.findall(r"审批\s*ID[：:]?\s*([A-Z0-9]{6})\b", quoted_text.upper())
+                if not matches and "审批" in quoted_text:
+                    matches = re.findall(r"\b([A-Z0-9]{6})\b", quoted_text.upper())
+
         if not matches:
             return
 
@@ -162,10 +174,20 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsM
             record = await get_approval(self, candidate)
             if record is None:
                 continue
+
+            if is_reject:
+                await remove_approval(self, candidate)
+                event.stop_event()
+                yield event.plain_result(
+                    f"❌ 已通过引用回复驳回审批 [{candidate}]：{record['description']}"
+                )
+                return
+
             action = record["action"]
             params = record["params"]
             result_msg = await self._dispatch_approved_action(action, params)
             await remove_approval(self, candidate)
+            event.stop_event()
             yield event.plain_result(
                 f"✅ 已通过引用回复批准审批 [{candidate}]：{record['description']}\n"
                 f"执行结果：{result_msg}"

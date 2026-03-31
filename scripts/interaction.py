@@ -43,14 +43,27 @@ def is_qrcode_available_status(status_payload: dict) -> tuple[bool, str]:
     return True, ""
 
 
+
+# 二维码有效期阈值：剩余秒数低于此值时视为"即将过期"，触发自动重取
+_QR_EXPIRY_THRESHOLD = 15
+
+
 async def do_get_qrcode(client: NCQQClient, instance_name: str) -> list:
     """Fetch QR code for an instance. Returns a list of str / Image items.
 
-    New API GET /api/containers/{name}/qrcode response variants:
+    Backend GET /api/containers/{name}/qrcode response variants:
       {status:"logged_in", uin:"..."}
-      {status:"ok", url:"data:image/png;base64,...", type:"file"}
-      {status:"ok", url:"https://...", type:"log"}
-      {status:"waiting"}
+      {status:"waiting"}                          ← 容器未就绪 or 二维码文件已过期
+      {status:"ok", url:"data:image/png;base64,...", type:"file",
+       expires_in:N, expires_at:T, generated_at:T}
+      {status:"ok", url:"https://...", type:"log"}  ← 从日志提取，无 expires_in
+
+    当 expires_in 存在时：
+      - expires_in > _QR_EXPIRY_THRESHOLD → 正常展示，附带有效期提示
+      - expires_in <= _QR_EXPIRY_THRESHOLD → 返回 sentinel 触发调用方 sleep + retry
+
+    Sentinel 格式（list 首项）：
+      "__qr_soon__:{expires_in}"   二维码即将过期，需等待后重取
     """
     try:
         res = await client.make_request(
@@ -66,23 +79,44 @@ async def do_get_qrcode(client: NCQQClient, instance_name: str) -> list:
             return [f"实例已登录（账号：{uin}），无需扫码。"]
 
         if status == "waiting":
-            return ["容器尚未就绪或正在启动中，暂时无法获取二维码，请稍后重试。"]
+            return ["二维码暂时不可用，可能正在生成或上一张已过期，请稍后重试。"]
 
         if status == "ok":
             url: str = res.get("url", "")
+            expires_in = res.get("expires_in")  # 仅 type=="file" 时存在
+
             if url.startswith("data:image"):
                 # Inline base64 image (type=="file")
                 b64_data = url.split(",", 1)[1] if "," in url else url
+
+                if expires_in is not None:
+                    secs = int(expires_in)
+                    if secs <= _QR_EXPIRY_THRESHOLD:
+                        # 即将过期：返回 sentinel，让调用方等待后重取
+                        tip = (
+                            f"当前二维码仅剩约 {secs} 秒有效，"
+                            f"稍等 {secs + 2} 秒后将自动重新获取…"
+                        )
+                        return [f"__qr_soon__:{secs + 2}", tip]
+                    # 有效期充足：展示并告知剩余时间
+                    return [
+                        Image.fromBase64(b64_data),
+                        f"登录二维码已就绪，请在 {secs} 秒内用手机 QQ 扫码登录。",
+                    ]
+
+                # type=="file" 但无 expires_in（兼容旧版后端）
                 return [
                     Image.fromBase64(b64_data),
                     "登录二维码已就绪，请尽快用手机 QQ 扫码登录。",
                 ]
+
             if url.startswith("http"):
                 # External URL extracted from container logs (type=="log")
                 return [
                     Image.fromURL(url),
                     "从容器日志中提取到二维码地址，请尽快扫码登录。",
                 ]
+
             return ["二维码已生成，但当前返回格式暂不支持直接展示，请联系管理员检查后端配置。"]
 
         return ["当前无法获取二维码，请稍后重试。"]

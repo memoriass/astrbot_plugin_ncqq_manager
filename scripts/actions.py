@@ -141,7 +141,12 @@ async def do_inject_by_alias(
             if detail:
                 return f"接入成功。{detail}"
             return "接入成功。"
-        return "接入结果暂时异常，请稍后重试或联系管理员。"
+        logger.warning(
+            "注入失败 alias=%s target=%s conn_id=%s status=%s message=%s",
+            alias, target, conn_id or container_name, status, msg,
+        )
+        hint = f"原因：{msg.strip()}" if msg.strip() else "后端未返回具体原因，请检查 BotShepherd 连接是否已注册。"
+        return f"接入失败，{hint}"
     except Exception as e:
         logger.warning("注入 alias=%s target=%s 失败: %s", alias, target, e)
         return "接入失败，请稍后重试或联系管理员。"

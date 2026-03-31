@@ -6,7 +6,7 @@ import time
 
 from astrbot.api.all import AstrMessageEvent, llm_tool
 
-from .actions import do_create_instance, do_inject_by_alias, do_instance_action
+from .actions import do_create_instance, do_inject_by_alias, do_instance_action, do_recreate_container
 from .approval import (
     get_approval,
     list_approvals,
@@ -36,15 +36,14 @@ class AdminToolsMixin:
             yield event.plain_result("当前没有待处理的审批请求。")
             return
 
-        lines = ["待审批请求列表："]
+        lines = ["⏳ 待审批请求列表："]
         for r in records:
             age_min = int((time.time() - r.get("created_at", 0)) / 60)
             lines.append(
-                f"• [{r['approval_id']}] {r['description']}"
-                f" | 申请者: {r['requester_qq']}"
-                f" | {age_min} 分钟前"
+                f"• [{r['approval_id']}] {r['description']}\n"
+                f"   申请者: {r['requester_qq']} | 已等待 {age_min} 分钟"
             )
-        yield event.plain_result("\n".join(lines))
+        yield event.plain_result("\n\n".join(lines))
 
     @llm_tool(name="approve_ncqq_request")
     async def approve_request(self, event: AstrMessageEvent, approval_id: str):
@@ -122,6 +121,7 @@ class AdminToolsMixin:
             "create": self._handle_create,
             "write_config": self._handle_write_config,
             "inject_backend": self._handle_inject_backend,
+            "switch_account": self._handle_switch_account,
             "bind_instance": self._handle_bind_instance,
             "manage_backends_add": self._handle_manage_backends_add,
             "manage_backends_remove": self._handle_manage_backends_remove,
@@ -181,6 +181,12 @@ class AdminToolsMixin:
             target="bs",
             conn_id=params["instance_name"],
         )
+    async def _handle_switch_account(self, params: dict) -> str:
+        inst_name = params["instance_name"]
+        msg = await do_recreate_container(
+            self.client, inst_name, clean_data=True, keep_config=True
+        )
+        return f"{msg}\n审批已通过，账号重置完毕。请申请者稍后自行发送“获取二维码”来登录新账号。"
 
     async def _handle_bind_instance(self, params: dict) -> str:
         mapping = await self.get_user_mapping()

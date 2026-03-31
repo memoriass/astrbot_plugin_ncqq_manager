@@ -1,9 +1,10 @@
+import asyncio
 import base64
 import re
 
 from astrbot.api.all import AstrMessageEvent, Image, llm_tool
 
-from .actions import do_create_instance, do_instance_action
+from .actions import do_create_instance, do_instance_action, do_recreate_container
 from .approval import create_approval
 from .config_manager import do_read_config, do_write_config
 from .html_renderer import render_instances
@@ -276,10 +277,80 @@ class InstanceToolsMixin:
             return
 
         results = await do_get_qrcode(self.client, target_instance_name)
+
+        # 检测即将过期 sentinel：["__qr_soon__:{wait_secs}", "用户提示"]
+        # do_get_qrcode 在 expires_in <= 阈值时返回此 sentinel，触发等待后重取
+        if results and isinstance(results[0], str) and results[0].startswith("__qr_soon__:"):
+            wait_secs = int(results[0].split(":", 1)[1])
+            tip = results[1] if len(results) > 1 else f"当前二维码即将过期，稍等 {wait_secs} 秒后将自动重新获取…"
+            yield event.plain_result(tip)
+            await asyncio.sleep(wait_secs)
+            results = await do_get_qrcode(self.client, target_instance_name)
+
         for item in results:
-            if isinstance(item, str):
+            if isinstance(item, str) and not item.startswith("__qr_soon__:"):
                 yield event.plain_result(item)
-            else:
+            elif not isinstance(item, str):
+                yield event.chain_result([item])
+
+    @llm_tool(name="switch_ncqq_account")
+    async def switch_account(self, event: AstrMessageEvent, instance_name: str):
+        """一键切换 ncqq 实例的登录账号（重置并拉取新二维码）。
+
+        适用于用户明确要求“切换账号”、“退出当前账号换一个”、“重置实例登录态并扫码”时。
+        本工具将自动保留实例配置，但清空原账号登录数据并重启，随后直接返回新二维码。
+
+        Args:
+            instance_name (string): 要切换账号的 ncqq 实例名。
+        """
+        is_admin = event.is_admin()
+        sender_id = str(event.get_sender_id())
+
+        if not is_admin:
+            allowed = await self.get_allowed_instances(sender_id)
+            if instance_name not in allowed:
+                yield event.plain_result(f"实例 {instance_name} 不在你的可操作范围内。")
+                return
+            # 生成审批单
+            approval_id = await create_approval(
+                self,
+                action="switch_account",
+                params={"instance_name": instance_name},
+                requester_qq=sender_id,
+                group_id=str(event.get_group_id() or ""),
+                description=f"切换实例 {instance_name} 账号（申请者: {sender_id}）",
+            )
+            yield event.plain_result(
+                self._approval_notice_single("切换账号", approval_id)
+            )
+            return
+
+        yield event.plain_result(f"⏳ 正在重置实例 {instance_name} 的登录态并保留基础配置，请稍候…")
+
+        msg = await do_recreate_container(
+            self.client, instance_name, clean_data=True, keep_config=True
+        )
+        if "失败" in msg or "暂时无法确认" in msg:
+            yield event.plain_result(f"重置过程出现异常：{msg}")
+            return
+
+        yield event.plain_result("✅ 实例已重置并重启，正在生成新登录二维码…")
+
+        await asyncio.sleep(8)
+
+        results = await do_get_qrcode(self.client, instance_name)
+
+        if results and isinstance(results[0], str) and results[0].startswith("__qr_soon__:"):
+            wait_secs = int(results[0].split(":", 1)[1])
+            tip = results[1] if len(results) > 1 else f"当前二维码即将过期，稍等 {wait_secs} 秒后将自动重新获取…"
+            yield event.plain_result(tip)
+            await asyncio.sleep(wait_secs)
+            results = await do_get_qrcode(self.client, instance_name)
+
+        for item in results:
+            if isinstance(item, str) and not item.startswith("__qr_soon__:"):
+                yield event.plain_result(item)
+            elif not isinstance(item, str):
                 yield event.chain_result([item])
 
     @llm_tool(name="check_ncqq_login_status")
@@ -318,13 +389,13 @@ class InstanceToolsMixin:
             uin = payload.get("uin", "")
             nickname = payload.get("nickname", "")
             if payload.get("status") == "error":
-                status_text = "登录状态暂时获取失败，请稍后重试。"
+                status_text = "⚠️ 获取失败，请稍后重试"
             elif logged_in:
                 label = f"{nickname}({uin})" if uin else nickname or "已登录"
-                status_text = f"已在线，当前账号：{label}"
+                status_text = f"🟢 已在线（{label}）"
             else:
-                status_text = "当前未登录，可能需要重新扫码。"
-            lines.append(f"[{name}] 登录状态：{status_text}")
+                status_text = "🔴 未登录（可能需重新扫码）"
+            lines.append(f"• {name}：{status_text}")
         yield event.plain_result("\n".join(lines))
 
     @llm_tool(name="monitor_ncqq_usage")

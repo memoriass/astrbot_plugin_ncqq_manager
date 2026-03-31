@@ -81,14 +81,10 @@ async def do_list_assets(client: NCQQClient) -> str:
         image_names = [str(item.get("name") or item) for item in images[:10]]
         node_names = [str(item.get("id") or item.get("name") or item) for item in nodes[:10]]
         lines = [
-            "资产概览：",
-            f"镜像数量：{len(images)}",
-            f"节点数量：{len(nodes)}",
+            "📊 资产概览：",
+            f"├─ 镜像 ({len(images)}个)：{'、'.join(image_names) if image_names else '无'}",
+            f"└─ 节点 ({len(nodes)}个)：{'、'.join(node_names) if node_names else '无'}",
         ]
-        if image_names:
-            lines.append(f"镜像示例：{'、'.join(image_names)}")
-        if node_names:
-            lines.append(f"节点示例：{'、'.join(node_names)}")
         return "\n".join(lines)
     except Exception as e:
         logger.warning("资产拉取失败: %s", e)
@@ -108,11 +104,9 @@ async def do_list_files(client: NCQQClient, instance_name: str, path: str = "") 
         folder_names = [str(f.get("name", "")) for f in folders[:20] if f.get("name")]
         file_names = [str(f.get("name", "")) for f in files[:20] if f.get("name")]
         return (
-            f"实例 {instance_name} 当前路径：{current or '/'}\n"
-            f"目录数量：{len(folders)}\n"
-            f"文件数量：{len(files)}\n"
-            f"目录示例：{'、'.join(folder_names) if folder_names else '无'}\n"
-            f"文件示例：{'、'.join(file_names) if file_names else '无'}"
+            f"📁 实例 {instance_name} 当前路径：{current or '/'}\n"
+            f"├─ 目录 ({len(folders)} 个)：{'、'.join(folder_names) if folder_names else '无'}\n"
+            f"└─ 文件 ({len(files)} 个)：{'、'.join(file_names) if file_names else '无'}"
         )
     except Exception as e:
         logger.warning("文件列表获取失败 %s: %s", instance_name, e)
