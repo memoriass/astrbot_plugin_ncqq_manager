@@ -53,6 +53,11 @@ class InstanceToolsMixin:
             yield event.plain_result(result)
             return
 
+        base_url = self.client.config.get("manager_url", "").rstrip("/")
+        for inst in result:
+            if inst.get("bot_avatar") and inst["bot_avatar"].startswith("/"):
+                inst["bot_avatar"] = f"{base_url}{inst['bot_avatar']}"
+
         mapping = await self.get_user_mapping()
         nickname_count = sum(1 for data in mapping.values() if data.get("nickname"))
 
@@ -61,15 +66,8 @@ class InstanceToolsMixin:
         if isinstance(rendered, bytes):
             b64 = base64.b64encode(rendered).decode()
             yield event.chain_result([Image.fromBase64(b64)])
-            if nickname_count:
-                yield event.plain_result(f"（含 {nickname_count} 条昵称记录）")
         else:
-            prefix = (
-                f"（含 {nickname_count} 条昵称记录）\n"
-                if nickname_count
-                else ""
-            )
-            yield event.plain_result(prefix + rendered)
+            yield event.plain_result(rendered)
 
     @llm_tool(name="ncqq_instance_action")
     async def instance_action(

@@ -111,6 +111,28 @@ class BackendToolsMixin:
         await self.save_user_mapping(mapping)
         yield event.plain_result(f"昵称已更新：{nickname}（QQ {qq_id}）。")
 
+    @llm_tool(name="list_ncqq_bindings")
+    async def list_bindings(self, event: AstrMessageEvent):
+        """以图片形式列出所有实例的归属绑定与用户昵称对照表。
+
+        适用于查看用户身份、昵称映射、以及他们绑定的实例列表。
+        """
+        mapping = await self.get_user_mapping()
+        if not mapping:
+            yield event.plain_result("当前没有任何用户绑定记录或昵称对照。")
+            return
+
+        from .html_renderer import render_bindings
+        import base64
+        from astrbot.api.all import Image
+
+        rendered = await render_bindings(mapping)
+        if isinstance(rendered, bytes):
+            b64 = base64.b64encode(rendered).decode()
+            yield event.chain_result([Image.fromBase64(b64)])
+        else:
+            yield event.plain_result(rendered)
+
     @llm_tool(name="manage_ncqq_backends")
     async def manage_backends(
         self,

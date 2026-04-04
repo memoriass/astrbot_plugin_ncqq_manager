@@ -19,6 +19,11 @@ logger = logging.getLogger(__name__)
 
 _TEMPLATE_PATH = pathlib.Path(__file__).parent.parent / "templates" / "instances.html"
 
+_BINDINGS_TEMPLATE_PATH = pathlib.Path(__file__).parent.parent / "templates" / "bindings.html"
+
+_bindings_template_cache: str | None = None
+_bindings_template_mtime: float = 0.0
+
 # 模板文件缓存：避免每次渲染都读磁盘
 _template_cache: str | None = None
 _template_mtime: float = 0.0
@@ -247,6 +252,87 @@ def _render_html(containers: list[dict]) -> tuple[str, int]:
         .replace("__CARDS__", cards_html)
     )
     return html, body_width
+async def render_bindings(mapping: dict) -> bytes | str:
+    """渲染昵称绑定对照图。如果渲染失败，返回纯文本作为回退。"""
+    if not mapping:
+        return "当前没有任何实例与用户的绑定对照记录。"
+
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        logger.warning("Playwright not installed, fallback to text for bindings")
+        return _fallback_bindings_text(mapping)
+
+    global _bindings_template_cache, _bindings_template_mtime
+    try:
+        current_mtime = os.path.getmtime(_BINDINGS_TEMPLATE_PATH)
+        if _bindings_template_cache is None or current_mtime > _bindings_template_mtime:
+            with open(_BINDINGS_TEMPLATE_PATH, "r", encoding="utf-8") as f:
+                _bindings_template_cache = f.read()
+            _bindings_template_mtime = current_mtime
+        template = _bindings_template_cache
+    except Exception as e:
+        logger.error("Failed to read bindings.html: %s", e)
+        return _fallback_bindings_text(mapping)
+
+    # 构建行数据
+    rows_html = ""
+    for uid, data in mapping.items():
+        nickname = data.get("nickname") or "未设置"
+        instances = data.get("instances") or []
+        inst_str = "、".join(instances) if instances else "（暂无实例）"
+        rows_html += f'''
+        <div class="row">
+            <div class="col uid">{uid}</div>
+            <div class="col nick">{nickname}</div>
+            <div class="col inst">{inst_str}</div>
+        </div>
+        '''
+
+    html_content = template.replace("__ROWS__", rows_html)
+
+    global _browser_instance, _playwright_instance
+    try:
+        if _playwright_instance is None:
+            _playwright_instance = await async_playwright().start()
+        if _browser_instance is None:
+            _browser_instance = await _playwright_instance.chromium.launch(
+                args=["--no-sandbox", "--disable-setuid-sandbox"]
+            )
+
+        page = await _browser_instance.new_page()
+        # 由于我们只需要截取对应区域，设置一个默认大小
+        await page.set_viewport_size({"width": 800, "height": 100})
+        await page.set_content(html_content, wait_until="networkidle")
+
+        # 找到主体容器截图
+        container = await page.query_selector(".container")
+        if not container:
+            await page.close()
+            return _fallback_bindings_text(mapping)
+
+        screenshot_bytes = await container.screenshot(type="jpeg", quality=90)
+        await page.close()
+        return screenshot_bytes
+
+    except Exception as e:
+        logger.error("Failed to render bindings via playwright: %s", e, exc_info=True)
+        return _fallback_bindings_text(mapping)
+
+
+def _fallback_bindings_text(mapping: dict) -> str:
+    """兜底文本渲染"""
+    if not mapping:
+        return "当前没有任何实例与用户的绑定对照记录。"
+
+    lines = ["📝 当前实例绑定对照表："]
+    for uid, data in mapping.items():
+        nickname = data.get("nickname") or "未设置"
+        instances = data.get("instances") or []
+        inst_str = "、".join(instances) if instances else "（暂无实例）"
+        lines.append(f"• 用户 {uid} ({nickname}) 绑定实例：{inst_str}")
+    return "\n".join(lines)
+
 
 
 # ------------------------------------------------------------------ #
