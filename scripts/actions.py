@@ -18,13 +18,13 @@ def _action_label(action: str) -> str:
     }.get(action, action)
 
 
-async def do_create_instance(client: NCQQClient, instance_name: str) -> str:
+async def do_create_instance(client: NCQQClient, instance_name: str) -> tuple[bool, str]:
     try:
         await client.make_request("POST", "/api/containers", json={"name": instance_name})
-        return f"实例 {instance_name} 的创建请求已提交，请稍后再查看运行状态。"
+        return True, f"实例 {instance_name} 的创建请求已提交，请稍后再查看运行状态。"
     except Exception as e:
         logger.warning("创建实例 %s 失败: %s", instance_name, e)
-        return f"实例 {instance_name} 创建失败，请稍后重试或联系管理员。"
+        return False, f"实例 {instance_name} 创建失败，请稍后重试或联系管理员。"
 
 
 async def do_instance_action(
@@ -32,17 +32,17 @@ async def do_instance_action(
     instance_name: str,
     action: str,
     delete_data: bool = False,
-) -> str:
+) -> tuple[bool, str]:
     try:
         url = f"/api/containers/{instance_name}/action?action={action}"
         if action == "delete" and delete_data:
             url += "&delete_data=true"
         await client.make_request("POST", url)
         suffix = "（含本地数据）" if action == "delete" and delete_data else ""
-        return f"实例 {instance_name} 的{_action_label(action)}请求已提交{suffix}。"
+        return True, f"实例 {instance_name} 的{_action_label(action)}请求已提交{suffix}。"
     except Exception as e:
         logger.warning("实例 %s 执行 %s 失败: %s", instance_name, action, e)
-        return f"实例 {instance_name} 的{_action_label(action)}失败，请稍后重试或联系管理员。"
+        return False, f"实例 {instance_name} 的{_action_label(action)}失败，请稍后重试或联系管理员。"
 
 
 async def do_clear_instance_data(
@@ -50,7 +50,7 @@ async def do_clear_instance_data(
     instance_name: str,
     scope: str = "all",
     node_id: str = "local",
-) -> str:
+) -> tuple[bool, str]:
     """调用管理器 DELETE /api/containers/{name}/data 清理实例数据目录。
 
     scope: all | config | cache | logs
@@ -65,10 +65,10 @@ async def do_clear_instance_data(
             parts.append(f"已清除：{'、'.join(cleared)}")
         if restarted:
             parts.append("容器已自动重启。")
-        return " ".join(parts)
+        return True, " ".join(parts)
     except Exception as e:
         logger.warning("清理实例 %s 数据失败: %s", instance_name, e)
-        return "数据清理失败，请稍后重试或联系管理员。"
+        return False, "数据清理失败，请稍后重试或联系管理员。"
 
 
 async def do_recreate_container(
@@ -78,7 +78,7 @@ async def do_recreate_container(
     keep_config: bool = False,
     node_id: str = "local",
     docker_image: str | None = None,
-) -> str:
+) -> tuple[bool, str]:
     """调用管理器 POST /api/containers/{name}/recreate 重建容器。
 
     自动快照原容器参数（端口/镜像/内存/重启策略），删除旧容器后原参重建。
@@ -96,7 +96,7 @@ async def do_recreate_container(
             "POST", f"/api/containers/{instance_name}/recreate", json=payload
         )
         if not isinstance(res, dict) or res.get("status") != "ok":
-            return "重建请求已发出，但结果暂时无法确认，请稍后查看实例状态。"
+            return False, "重建请求已发出，但结果暂时无法确认，请稍后查看实例状态。"
         ports = res.get("ports", {})
         cleared = res.get("cleared", [])
         parts = [f"实例 {instance_name} 重建完成。"]
@@ -106,10 +106,10 @@ async def do_recreate_container(
             )
         if cleared:
             parts.append(f"已清除：{'、'.join(cleared)}")
-        return " ".join(parts)
+        return True, " ".join(parts)
     except Exception as e:
         logger.warning("重建实例 %s 失败: %s", instance_name, e)
-        return "重建失败，请稍后重试或联系管理员。"
+        return False, "重建失败，请稍后重试或联系管理员。"
 
 
 async def do_inject_by_alias(
@@ -119,7 +119,7 @@ async def do_inject_by_alias(
     container_name: str = "",
     conn_id: str = "",
     uin: str = "default",
-) -> str:
+) -> tuple[bool, str]:
     """通过雷达端点别名执行注入。
 
     target='bs': 将别名对应端点追加到指定 BS connection 的 target_endpoints（热重载立即生效）。
@@ -139,14 +139,14 @@ async def do_inject_by_alias(
         if status == "ok":
             detail = msg.strip()
             if detail:
-                return f"接入成功。{detail}"
-            return "接入成功。"
+                return True, f"接入成功。{detail}"
+            return True, "接入成功。"
         logger.warning(
             "注入失败 alias=%s target=%s conn_id=%s status=%s message=%s",
             alias, target, conn_id or container_name, status, msg,
         )
         hint = f"原因：{msg.strip()}" if msg.strip() else "后端未返回具体原因，请检查 BotShepherd 连接是否已注册。"
-        return f"接入失败，{hint}"
+        return False, f"接入失败，{hint}"
     except Exception as e:
         logger.warning("注入 alias=%s target=%s 失败: %s", alias, target, e)
-        return "接入失败，请稍后重试或联系管理员。"
+        return False, "接入失败，请稍后重试或联系管理员。"

@@ -257,12 +257,6 @@ async def render_bindings(mapping: dict) -> bytes | str:
     if not mapping:
         return "当前没有任何实例与用户的绑定对照记录。"
 
-    try:
-        from playwright.async_api import async_playwright
-    except ImportError:
-        logger.warning("Playwright not installed, fallback to text for bindings")
-        return _fallback_bindings_text(mapping)
-
     global _bindings_template_cache, _bindings_template_mtime
     try:
         current_mtime = os.path.getmtime(_BINDINGS_TEMPLATE_PATH)
@@ -291,16 +285,12 @@ async def render_bindings(mapping: dict) -> bytes | str:
 
     html_content = template.replace("__ROWS__", rows_html)
 
-    global _browser_instance, _playwright_instance
-    try:
-        if _playwright_instance is None:
-            _playwright_instance = await async_playwright().start()
-        if _browser_instance is None:
-            _browser_instance = await _playwright_instance.chromium.launch(
-                args=["--no-sandbox", "--disable-setuid-sandbox"]
-            )
+    browser = await _ensure_browser()
+    if browser is None:
+        return _fallback_bindings_text(mapping)
 
-        page = await _browser_instance.new_page()
+    try:
+        page = await browser.new_page()
         # 由于我们只需要截取对应区域，设置一个默认大小
         await page.set_viewport_size({"width": 800, "height": 100})
         await page.set_content(html_content, wait_until="networkidle")
@@ -355,7 +345,13 @@ async def _ensure_browser():
     try:
         _playwright_instance = await async_playwright().start()
         _browser_instance = await _playwright_instance.chromium.launch(
-            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-web-security",          # 允许 file:// 页面加载外部 http 头像
+                "--allow-file-access-from-files",  # 允许 file:// 页面访问其他 file:// 资源
+            ]
         )
         logger.info("playwright browser launched (reusable)")
         return _browser_instance

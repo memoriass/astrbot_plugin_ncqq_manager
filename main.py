@@ -152,7 +152,7 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsM
             return
 
         text = event.message_str.strip().upper()
-        matches = re.findall(r"\b([A-Z0-9]{6})\b", text)
+        matches = re.findall(r"\b([A-Z][A-Z0-9]{5})\b", text)
 
         # 检查是否是拒绝操作
         is_reject = bool(re.search(r"拒绝|不|驳回|取消|REJECT|NO|CANCEL", text))
@@ -163,7 +163,7 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsM
             if quoted_text:
                 matches = re.findall(r"审批\s*ID[：:]?\s*([A-Z0-9]{6})\b", quoted_text.upper())
                 if not matches and "审批" in quoted_text:
-                    matches = re.findall(r"\b([A-Z0-9]{6})\b", quoted_text.upper())
+                    matches = re.findall(r"\b([A-Z][A-Z0-9]{5})\b", quoted_text.upper())
 
         if not matches:
             return

@@ -81,7 +81,7 @@ async def do_list_assets(client: NCQQClient) -> str:
         image_names = [str(item.get("name") or item) for item in images[:10]]
         node_names = [str(item.get("id") or item.get("name") or item) for item in nodes[:10]]
         lines = [
-            "📊 资产概览：",
+            "资产概览：",
             f"├─ 镜像 ({len(images)}个)：{'、'.join(image_names) if image_names else '无'}",
             f"└─ 节点 ({len(nodes)}个)：{'、'.join(node_names) if node_names else '无'}",
         ]
@@ -104,8 +104,8 @@ async def do_list_files(client: NCQQClient, instance_name: str, path: str = "") 
         folder_names = [str(f.get("name", "")) for f in folders[:20] if f.get("name")]
         file_names = [str(f.get("name", "")) for f in files[:20] if f.get("name")]
         return (
-            f"📁 实例 {instance_name} 当前路径：{current or '/'}\n"
-            f"├─ 目录 ({len(folders)} 个)：{'、'.join(folder_names) if folder_names else '无'}\n"
+            f"实例 {instance_name} 当前路径：{current or '/'}\\n"
+            f"├─ 目录 ({len(folders)} 个)：{'、'.join(folder_names) if folder_names else '无'}\\n"
             f"└─ 文件 ({len(files)} 个)：{'、'.join(file_names) if file_names else '无'}"
         )
     except Exception as e:
@@ -142,12 +142,7 @@ async def do_save_radar_endpoints(client: NCQQClient, endpoints: list) -> str:
 async def do_get_stats(
     client: NCQQClient, instance_name: str
 ) -> dict:
-    """获取容器 stats（含 last_event 字段）。
-
-    返回管理器原始 dict，包含：
-      cpu_percent, mem_usage_mb, mem_limit_mb, net_rx_mb, net_tx_mb,
-      last_event: {action, time} | None
-    """
+    """获取容器 stats（含 last_event 字段）。"""
     res = await client.make_request(
         "GET", f"/api/containers/{instance_name}/stats"
     )
@@ -159,11 +154,7 @@ async def do_watch_events_sse(
     instance_name: str,
     timeout: int = 60,
 ) -> list[dict]:
-    """短暂订阅管理器 SSE 事件流，收集 timeout 秒内到达的容器生命周期事件。
-
-    返回 list[{name, action, status, time, exit_code}]，超时或连接关闭后返回。
-    适合在工具调用后等待状态跳变确认（如 recreate 后等待 start 事件）。
-    """
+    """短时订阅单实例 SSE 事件流。"""
     return await client.stream_events(instance_name, timeout=timeout)
 
 
@@ -171,14 +162,17 @@ async def do_confirm_instance_action(
     client: NCQQClient,
     instance_name: str,
     expected_actions: list[str],
-    timeout: int = 20,
-) -> str:
-    """短暂等待 SSE，确认实例动作已触发预期生命周期事件。"""
+    timeout: int = 10,
+) -> tuple[bool, str]:
+    """短暂等待 SSE，确认实例动作已触发预期生命周期事件。
+
+    返回 (confirmed: bool, message: str)。
+    """
     try:
         events = await do_watch_events_sse(client, instance_name, timeout=timeout)
     except Exception as e:
         logger.warning("SSE 动作确认失败 %s: %s", instance_name, e)
-        return f"动作已提交，状态确认暂时失败，请稍后手动查看实例状态。"
+        return False, "动作已提交，状态确认暂时失败，请稍后手动查看实例状态。"
 
     normalized = {str(a).strip().lower() for a in expected_actions if str(a).strip()}
     matched = []
@@ -192,14 +186,14 @@ async def do_confirm_instance_action(
         latest_action = _action_label(
             str(latest.get("action") or latest.get("status") or "状态变更")
         )
-        return f"实例 {instance_name} 已收到动作反馈：{latest_action}。"
+        return True, f"实例 {instance_name} 已收到动作反馈：{latest_action}。"
 
     if events:
-        return (
+        return False, (
             f"实例 {instance_name} 的操作已提交，但在 {timeout} 秒内还未等到预期状态变化，请稍后再查看一次。"
         )
 
-    return f"动作已提交，但在 {timeout} 秒内未收到实例 {instance_name} 的状态变化消息。"
+    return False, f"动作已提交，但在 {timeout} 秒内未收到实例 {instance_name} 的状态变化消息。"
 
 
 async def do_get_monitor(

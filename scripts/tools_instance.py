@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import re
 
@@ -7,12 +6,8 @@ from astrbot.api.all import AstrMessageEvent, Image, llm_tool
 from .actions import do_create_instance, do_instance_action, do_recreate_container
 from .approval import create_approval
 from .config_manager import do_read_config, do_write_config
-from .html_renderer import render_instances
-from .interaction import (
-    do_check_login_status,
-    do_get_qrcode,
-    is_qrcode_available_status,
-)
+from .html_renderer import render_bindings, render_instances
+from .interaction import do_check_login_status, do_get_qrcode
 from .monitoring import (
     do_confirm_instance_action,
     do_get_monitor,
@@ -23,91 +18,279 @@ from .monitoring import (
 
 
 class InstanceToolsMixin:
-    _ACTION_EVENT_MAP = {
-        "start": ["start"],
-        "stop": ["stop", "die"],
+    # 动作 → 期望 SSE 事件映射（用于操作后确认）
+    _ACTION_EVENT_MAP: dict[str, list[str]] = {
+        "start":   ["start"],
+        "stop":    ["stop", "die"],
         "restart": ["restart", "start"],
-        "pause": ["pause"],
+        "pause":   ["pause"],
         "unpause": ["unpause", "start"],
-        "kill": ["kill", "die"],
-        "delete": ["destroy", "die"],
+        "kill":    ["kill", "die"],
+        "delete":  ["destroy", "die"],
     }
 
-    @llm_tool(name="list_ncqq_instances")
-    async def list_instances(self, event: AstrMessageEvent):
-        """列出 ncqq 管理器中的实例状态列表。
-
-        适用于用户询问实例清单、运行状态、归属信息、在线情况时。
-        不适用于执行启停、删除、配置写入。
-        注意：如果用户请求"获取二维码""拉二维码""扫码"，不要调用此工具，应调用 get_ncqq_qrcode。
-        """
-        sender_id = str(event.get_sender_id())
-        is_admin = event.is_admin()
-
-        allowed = await self.get_allowed_instances(sender_id)
-
-        result = await do_list_instances(self.client, allowed, is_admin)
-
-        # Error string returned directly
-        if isinstance(result, str):
-            yield event.plain_result(result)
-            return
-
-        base_url = self.client.config.get("manager_url", "").rstrip("/")
-        for inst in result:
-            if inst.get("bot_avatar") and inst["bot_avatar"].startswith("/"):
-                inst["bot_avatar"] = f"{base_url}{inst['bot_avatar']}"
-
-        mapping = await self.get_user_mapping()
-        nickname_count = sum(1 for data in mapping.values() if data.get("nickname"))
-
-        rendered = await render_instances(result)
-
-        if isinstance(rendered, bytes):
-            b64 = base64.b64encode(rendered).decode()
-            yield event.chain_result([Image.fromBase64(b64)])
-        else:
-            yield event.plain_result(rendered)
-
-    @llm_tool(name="ncqq_instance_action")
-    async def instance_action(
+    @llm_tool(name="ncqq_query")
+    async def ncqq_query(
         self,
         event: AstrMessageEvent,
-        instance_names: str,
-        action: str,
-        delete_data: bool = False,
+        query: str,
+        instance_names: str = "",
+        file_name: str = "onebot11_uin.json",
+        path: str = "",
     ):
-        """执行 ncqq 实例的基础管理动作，支持一次操作多个实例。
+        """查询 ncqq 实例信息，涵盖列表、登录状态、监控、日志、资产、配置、文件目录。
 
-        仅在用户明确表达 start、stop、restart、pause、unpause、kill、delete 这类动作意图时调用。
-        不要把查看状态、获取二维码、查询配置误判为实例动作。
-        注意：如果用户请求"获取二维码""拉二维码""扫码"，不要调用此工具，应调用 get_ncqq_qrcode。
+        当用户想了解"有哪些实例""谁在线谁掉线""资源占用""看日志""读配置文件""查目录"时使用。
+        本工具只读，不执行任何写入或控制操作。
 
         Args:
-            instance_names (string): 要操作的 ncqq 实例名，支持一次传入多个，用逗号分隔，例如 "bot1,bot2"。必须是明确的实例标识，不是用户昵称。
-            action (string): 管理动作。只应为 start、stop、restart、pause、unpause、kill、delete 之一。pause/unpause 暂停/恢复容器进程；kill 强制终止；delete 销毁容器。
-            delete_data (boolean): 仅在 action 为 delete 时有效。为 true 时同时删除该实例在管理器上的本地数据目录（QQ数据、配置、插件、缓存），不可恢复；为 false 时仅移除容器但保留数据。请根据用户意图判断：用户说"彻底删除""清除所有数据""删干净"等表达时设为 true；仅说"删除实例""移除容器"时设为 false。默认为 false。
+            query (string): 查询类型，必须是以下之一：
+                "instances" — 列出所有实例及运行状态（含头像、心跳、QQ号）。
+                "login"     — 检查指定实例的实时登录状态（是否在线、账号信息）。
+                "monitor"   — 读取指定实例的资源占用摘要（CPU/内存/网络）。
+                "logs"      — 读取指定实例的容器尾部日志（最近 8 行，已脱敏）。
+                "assets"    — 列出管理节点上的镜像与节点资产（仅管理员）。
+                "config"    — 读取实例容器内的配置文件内容（仅管理员）。
+                "files"     — 列出实例数据目录下的文件与子目录（仅管理员）。
+            instance_names (string): 实例名，login/monitor/logs/config/files 时必填；支持逗号分隔多个（login 支持批量）。
+            file_name (string): 仅 query=config 时有效，容器内目标文件名，默认 onebot11_uin.json。
+            path (string): 仅 query=files 时有效，相对于实例数据根目录的路径，留空表示根目录。
         """
-
-        names = [n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()]
-        if not names:
-            yield event.plain_result("没有识别到可操作的实例名，请至少提供一个实例名。")
-            return
-
         sender_id = str(event.get_sender_id())
         is_admin = event.is_admin()
 
-        # delete is a destructive high-privilege action — requires admin or approval
+        # --- instances ---
+        if query == "instances":
+            allowed = await self.get_allowed_instances(sender_id)
+            result = await do_list_instances(self.client, allowed, is_admin)
+            if isinstance(result, str):
+                yield event.plain_result(result)
+                return
+            base_url = self.client.config.get("manager_url", "").rstrip("/")
+            for inst in result:
+                if inst.get("bot_avatar") and inst["bot_avatar"].startswith("/"):
+                    inst["bot_avatar"] = f"{base_url}{inst['bot_avatar']}"
+            rendered = await render_instances(result)
+            if isinstance(rendered, bytes):
+                yield event.chain_result([Image.fromBase64(base64.b64encode(rendered).decode())])
+            else:
+                yield event.plain_result(rendered)
+            mapping = await self.get_user_mapping()
+            if any(d.get("nickname") for d in mapping.values()):
+                rb = await render_bindings(mapping)
+                if isinstance(rb, bytes):
+                    yield event.chain_result([Image.fromBase64(base64.b64encode(rb).decode())])
+                else:
+                    yield event.plain_result(rb)
+            return
+
+        # --- login ---
+        if query == "login":
+            names = [n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()]
+            if not names:
+                yield event.plain_result("请补充实例名（instance_names）。")
+                return
+            if not is_admin:
+                allowed = await self.get_allowed_instances(sender_id)
+                bad = [n for n in names if n not in allowed]
+                if bad:
+                    yield event.plain_result(f"无权查看以下实例：{'、'.join(bad)}。")
+                    return
+            lines: list[str] = []
+            for name in names:
+                p = await do_check_login_status(self.client, name)
+                if p.get("status") == "error":
+                    lines.append(f"• {name}：⚠️ 获取失败，请稍后重试")
+                elif p.get("logged_in"):
+                    uin = p.get("uin", "")
+                    nick = p.get("nickname", "")
+                    label = f"{nick}({uin})" if uin else nick or "已登录"
+                    lines.append(f"• {name}：🟢 在线（{label}）")
+                else:
+                    lines.append(f"• {name}：🔴 未登录（可能需重新扫码）")
+            yield event.plain_result("\n".join(lines))
+            return
+
+        # --- monitor / logs ---
+        if query in ("monitor", "logs"):
+            if not is_admin:
+                yield event.plain_result("监控与日志查询仅限管理员。")
+                return
+            name = instance_names.strip()
+            if not name:
+                yield event.plain_result("请补充实例名（instance_names）。")
+                return
+            yield event.plain_result(await do_get_monitor(self.client, name, fetch_logs=(query == "logs")))
+            return
+
+        # --- assets ---
+        if query == "assets":
+            if not is_admin:
+                yield event.plain_result("资产查询仅限管理员。")
+                return
+            yield event.plain_result(await do_list_assets(self.client))
+            return
+
+        # --- config ---
+        if query == "config":
+            if not is_admin:
+                yield event.plain_result("配置读取仅限管理员。")
+                return
+            name = instance_names.strip()
+            if not name:
+                yield event.plain_result("请补充实例名（instance_names）。")
+                return
+            yield event.plain_result(await do_read_config(self.client, name, file_name))
+            return
+
+        # --- files ---
+        if query == "files":
+            if not is_admin:
+                yield event.plain_result("文件目录查询仅限管理员。")
+                return
+            name = instance_names.strip()
+            if not name:
+                yield event.plain_result("请补充实例名（instance_names）。")
+                return
+            yield event.plain_result(await do_list_files(self.client, name, path))
+            return
+
+        yield event.plain_result(
+            f"未知查询类型 '{query}'，支持：instances / login / monitor / logs / assets / config / files。"
+        )
+
+    @llm_tool(name="ncqq_action")
+    async def ncqq_action(
+        self,
+        event: AstrMessageEvent,
+        action: str,
+        instance_names: str = "",
+        delete_data: bool = False,
+        file_name: str = "",
+        file_content: str = "",
+    ):
+        """对 ncqq 实例执行控制或写入操作，涵盖生命周期管理、创建、账号重置、配置覆写。
+
+        当用户明确要求启动、停止、重启、删除、创建实例，或要求切换账号、覆写配置文件时调用。
+        纯查询场景（查状态、看日志、读配置）请使用 ncqq_query；扫码请使用 ncqq_qrcode。
+
+        Args:
+            action (string): 操作类型，必须是以下之一：
+                "start"        — 启动容器。
+                "stop"         — 停止容器。
+                "restart"      — 重启容器。
+                "pause"        — 暂停容器进程。
+                "unpause"      — 恢复容器进程。
+                "kill"         — 强制终止容器。
+                "delete"       — 销毁容器（delete_data 控制是否同时删除数据目录）。
+                "create"       — 创建新实例，支持一次传入多个名称。
+                "switch"       — 重置登录账号（保留配置、清空数据、重建容器）。完成后请再调 ncqq_qrcode 拉取新二维码。
+                "write_config" — 覆写实例容器内配置文件，需同时提供 file_name 和 file_content。
+            instance_names (string): 目标实例名，支持逗号分隔多个（create/start/stop 等均支持批量）。
+            delete_data (boolean): 仅 action=delete 时有效。true 时同时删除本地数据目录（QQ数据/配置/插件/缓存，不可恢复）；false 时仅移除容器保留数据。用户说"彻底删除""删干净"时为 true，仅说"删除"时为 false。
+            file_name (string): 仅 action=write_config 时必填，容器内目标文件名。
+            file_content (string): 仅 action=write_config 时必填，要完整写入的文件内容（非增量）。
+        """
+        sender_id = str(event.get_sender_id())
+        is_admin = event.is_admin()
+
+        names = [n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()]
+
+        # ── create ──────────────────────────────────────────────────────────
+        if action == "create":
+            if not names:
+                yield event.plain_result("请补充实例名（instance_names）。")
+                return
+            if not is_admin:
+                aid = await create_approval(
+                    self,
+                    action="create",
+                    params={"instance_names": names},
+                    requester_qq=sender_id,
+                    group_id=str(event.get_group_id() or ""),
+                    description=f"创建实例 {'、'.join(names)}（申请者: {sender_id}）",
+                )
+                yield event.plain_result(self._approval_notice_single("创建实例", aid))
+                return
+            results: list[str] = []
+            for n in names:
+                ok, msg = await do_create_instance(self.client, n)
+                results.append(msg)
+            yield event.plain_result("\n".join(results))
+            return
+
+        # ── switch ──────────────────────────────────────────────────────────
+        if action == "switch":
+            name = (names[0] if names else "").strip()
+            if not name:
+                yield event.plain_result("请补充实例名（instance_names）。")
+                return
+            if not is_admin:
+                allowed = await self.get_allowed_instances(sender_id)
+                if name not in allowed:
+                    yield event.plain_result(f"实例 {name} 不在你的可操作范围内。")
+                    return
+                aid = await create_approval(
+                    self,
+                    action="switch_account",
+                    params={"instance_name": name},
+                    requester_qq=sender_id,
+                    group_id=str(event.get_group_id() or ""),
+                    description=f"切换实例 {name} 账号（申请者: {sender_id}）",
+                )
+                yield event.plain_result(self._approval_notice_single("切换账号", aid))
+                return
+            yield event.plain_result(f"⏳ 正在重置 {name} 的登录态（保留配置），请稍候…")
+            ok, msg = await do_recreate_container(self.client, name, clean_data=True, keep_config=True)
+            if not ok:
+                yield event.plain_result(f"重置失败：{msg}")
+                return
+            yield event.plain_result(f"✅ {msg}\n容器已重建，请调用 ncqq_qrcode 拉取新登录二维码。")
+            return
+
+        # ── write_config ─────────────────────────────────────────────────────
+        if action == "write_config":
+            name = (names[0] if names else "").strip()
+            if not name or not file_name or not file_content:
+                yield event.plain_result("write_config 需要同时提供 instance_names、file_name、file_content。")
+                return
+            if not is_admin:
+                allowed = await self.get_allowed_instances(sender_id)
+                if name not in allowed:
+                    yield event.plain_result(f"实例 {name} 不在你的可操作范围内，无法提交配置修改申请。")
+                    return
+                aid = await create_approval(
+                    self,
+                    action="write_config",
+                    params={"instance_name": name, "file_name": file_name, "file_content": file_content},
+                    requester_qq=sender_id,
+                    group_id=str(event.get_group_id() or ""),
+                    description=f"覆写配置 {name}/{file_name}（申请者: {sender_id}）",
+                )
+                yield event.plain_result(self._approval_notice_single("覆写配置", aid))
+                return
+            yield event.plain_result(await do_write_config(self.client, name, file_name, file_content))
+            return
+
+        # ── lifecycle: start/stop/restart/pause/unpause/kill/delete ──────────
+        _lifecycle = {"start", "stop", "restart", "pause", "unpause", "kill", "delete"}
+        if action not in _lifecycle:
+            yield event.plain_result(
+                f"不支持的操作 '{action}'。支持：start / stop / restart / pause / unpause / kill / delete / create / switch / write_config。"
+            )
+            return
+
+        if not names:
+            yield event.plain_result("请补充实例名（instance_names）。")
+            return
+
         if action == "delete":
             if not is_admin:
                 allowed = await self.get_allowed_instances(sender_id)
-                rejected = [n for n in names if n not in allowed]
-                if rejected:
-                    yield event.plain_result(
-                        f"以下实例不在你的可操作范围内：{'、'.join(rejected)}。如需删除，请联系管理员处理。"
-                    )
+                bad = [n for n in names if n not in allowed]
+                if bad:
+                    yield event.plain_result(f"以下实例不在你的可操作范围内：{'、'.join(bad)}。如需删除请联系管理员。")
                     return
-                # 为每个实例单独创建审批记录
                 ids = []
                 for n in names:
                     aid = await create_approval(
@@ -119,36 +302,26 @@ class InstanceToolsMixin:
                         description=f"销毁实例 {n}{'（含本地数据）' if delete_data else ''}（申请者: {sender_id}）",
                     )
                     ids.append(aid)
-                yield event.plain_result(
-                    self._approval_notice_batch("销毁实例", list(zip(names, ids)))
-                )
+                yield event.plain_result(self._approval_notice_batch("销毁实例", list(zip(names, ids))))
                 return
-            # Admin executes directly
-            results: list[str] = []
+            # Admin delete
+            results = []
             cleaned: list[str] = []
             for n in names:
-                msg = await do_instance_action(
-                    self.client, n, action, delete_data=delete_data
-                )
-                if "失败" not in msg:
-                    confirm = await do_confirm_instance_action(
-                        self.client,
-                        n,
-                        self._ACTION_EVENT_MAP.get(action, [action]),
-                    )
+                ok, msg = await do_instance_action(self.client, n, "delete", delete_data=delete_data)
+                if ok:
+                    _, confirm = await do_confirm_instance_action(self.client, n, self._ACTION_EVENT_MAP["delete"])
                     msg = f"{msg}\n{confirm}"
-                results.append(msg)
-                # 删除成功后自动清理 user_mapping 中对该实例的残留引用
-                if "失败" not in msg:
                     cleaned.append(n)
+                results.append(msg)
             if cleaned:
                 mapping = await self.get_user_mapping()
                 changed = False
-                for uid, data in mapping.items():
-                    for inst_name in cleaned:
-                        insts = data.get("instances", [])
-                        if inst_name in insts:
-                            insts.remove(inst_name)
+                for data in mapping.values():
+                    for inst in cleaned:
+                        lst = data.get("instances", [])
+                        if inst in lst:
+                            lst.remove(inst)
                             changed = True
                 if changed:
                     await self.save_user_mapping(mapping)
@@ -156,409 +329,59 @@ class InstanceToolsMixin:
             yield event.plain_result("\n".join(results))
             return
 
-        # Non-destructive actions: check binding
+        # Non-destructive lifecycle
         if not is_admin:
             allowed = await self.get_allowed_instances(sender_id)
-            rejected = [n for n in names if n not in allowed]
-            if rejected:
-                yield event.plain_result(
-                    f"以下实例暂时不能由你操作：{'、'.join(rejected)}。请先联系管理员完成绑定。"
-                )
+            bad = [n for n in names if n not in allowed]
+            if bad:
+                yield event.plain_result(f"以下实例不在你的可操作范围内：{'、'.join(bad)}。请联系管理员完成绑定。")
                 return
 
         results = []
         for n in names:
-            msg = await do_instance_action(self.client, n, action)
-            if "失败" not in msg:
-                confirm = await do_confirm_instance_action(
-                    self.client,
-                    n,
-                    self._ACTION_EVENT_MAP.get(action, [action]),
-                )
+            ok, msg = await do_instance_action(self.client, n, action)
+            if ok:
+                _, confirm = await do_confirm_instance_action(self.client, n, self._ACTION_EVENT_MAP.get(action, [action]))
                 msg = f"{msg}\n{confirm}"
             results.append(msg)
         yield event.plain_result("\n".join(results))
 
-    @llm_tool(name="get_ncqq_qrcode")
-    async def get_qrcode(self, event: AstrMessageEvent, instance_name: str = ""):
-        """获取 ncqq 实例的登录二维码图片。
+    @llm_tool(name="ncqq_qrcode")
+    async def ncqq_qrcode(self, event: AstrMessageEvent, instance_name: str):
+        """获取指定 ncqq 实例的登录二维码图片。
 
-        用户说"获取二维码""拉二维码""帮XX扫码""帮@用户获取二维码""给XX拉个码"
-        等任何包含"二维码""扫码""登录码"关键词的请求时，必须直接调用此工具。
-        本工具内部会自动检查实例是否需要扫码，无需先调用 check_login_status 或 list_instances。
-        若消息中 @ 了某个用户，优先从该用户绑定实例中定位目标；候选唯一时自动选择。
-        当存在多个候选实例时，不要猜测，必须要求用户补充实例名。
+        当用户说"获取二维码""拉码""扫码登录""帮我拉个码"等含"二维码/扫码/登录码"关键词时调用。
+        本工具直接拉取并返回二维码，不再内部自动检查登录状态——如需确认是否需要扫码，
+        请先调用 ncqq_query(query="login") 确认实例处于未登录状态后再调用本工具。
+        若二维码即将过期，本工具会直接告知，不会自动等待重取；请用户稍候后再次发起请求。
 
         Args:
-            instance_name (string): 目标 ncqq 实例名。可为空；当消息里包含 @目标用户 且可唯一定位实例时允许省略。
+            instance_name (string): 目标 ncqq 实例名，必须明确提供。
         """
         sender_id = str(event.get_sender_id())
         is_admin = event.is_admin()
+        name = instance_name.strip()
 
-        target_user_id = self.get_first_at_user_id(event)
-        if target_user_id:
-            if not is_admin:
-                yield event.plain_result(
-                    "只有管理员才可以通过 @用户 的方式代为获取二维码。"
-                )
-                return
-            candidate_instances = await self.get_instances_for_user(target_user_id)
-            if not candidate_instances:
-                yield event.plain_result("目标用户当前还没有绑定可用实例。")
-                return
-        else:
-            candidate_instances = await self.get_allowed_instances(sender_id)
-            if is_admin and instance_name:
-                candidate_instances = []
-
-        target_instance_name = instance_name.strip()
-        if target_user_id and target_instance_name:
-            matched = [
-                inst
-                for inst in candidate_instances
-                if target_instance_name.lower() in inst.lower()
-            ]
-            if len(matched) == 1:
-                target_instance_name = matched[0]
-            elif len(matched) > 1:
-                yield event.plain_result(
-                    f"实例名匹配到多个候选：{'、'.join(matched)}。请补充更完整的实例名。"
-                )
-                return
-            else:
-                yield event.plain_result(
-                    f"未在该用户的实例中找到与“{target_instance_name}”对应的结果，请确认实例名后重试。"
-                )
-                return
-
-        if target_user_id and not target_instance_name:
-            eligible_instances = []
-            for inst in candidate_instances:
-                status_payload = await do_check_login_status(self.client, inst)
-                available, reason = is_qrcode_available_status(status_payload)
-                if available:
-                    login_label = (
-                        "离线/待登录" if not status_payload.get("logged_in") else "在线"
-                    )
-                    eligible_instances.append((inst, login_label, reason))
-            if len(eligible_instances) == 1:
-                target_instance_name = eligible_instances[0][0]
-            elif len(eligible_instances) > 1:
-                summary = [name for name, _, _ in eligible_instances]
-                yield event.plain_result(
-                    f"目标用户有多个实例都可能需要扫码：{'、'.join(summary)}。请补充实例名后再试。"
-                )
-                return
-            else:
-                yield event.plain_result(
-                    "目标用户当前没有可直接拉取二维码的掉线/待登录实例。"
-                )
-                return
-
-        if not target_instance_name:
-            yield event.plain_result(
-                "请直接提供实例名；如果你是管理员，也可以在消息中 @目标用户 让我帮你定位实例。"
-            )
+        if not name:
+            yield event.plain_result("请提供实例名（instance_name）。")
             return
-
-        if not is_admin and not target_user_id:
-            if target_instance_name not in candidate_instances:
-                yield event.plain_result("该实例不在你的可操作范围内，请确认实例名或联系管理员。")
-                return
-
-        status_payload = await do_check_login_status(self.client, target_instance_name)
-        available, reason = is_qrcode_available_status(status_payload)
-        if not available:
-            yield event.plain_result(
-                f"实例 {target_instance_name} 当前不需要重新扫码。{reason or '如仍有异常，请稍后再检查登录状态。'}"
-            )
-            return
-
-        results = await do_get_qrcode(self.client, target_instance_name)
-
-        # 检测即将过期 sentinel：["__qr_soon__:{wait_secs}", "用户提示"]
-        # do_get_qrcode 在 expires_in <= 阈值时返回此 sentinel，触发等待后重取
-        if results and isinstance(results[0], str) and results[0].startswith("__qr_soon__:"):
-            wait_secs = int(results[0].split(":", 1)[1])
-            tip = results[1] if len(results) > 1 else f"当前二维码即将过期，稍等 {wait_secs} 秒后将自动重新获取…"
-            yield event.plain_result(tip)
-            await asyncio.sleep(wait_secs)
-            results = await do_get_qrcode(self.client, target_instance_name)
-
-        for item in results:
-            if isinstance(item, str) and not item.startswith("__qr_soon__:"):
-                yield event.plain_result(item)
-            elif not isinstance(item, str):
-                yield event.chain_result([item])
-
-    @llm_tool(name="switch_ncqq_account")
-    async def switch_account(self, event: AstrMessageEvent, instance_name: str):
-        """一键切换 ncqq 实例的登录账号（重置并拉取新二维码）。
-
-        适用于用户明确要求“切换账号”、“退出当前账号换一个”、“重置实例登录态并扫码”时。
-        本工具将自动保留实例配置，但清空原账号登录数据并重启，随后直接返回新二维码。
-
-        Args:
-            instance_name (string): 要切换账号的 ncqq 实例名。
-        """
-        is_admin = event.is_admin()
-        sender_id = str(event.get_sender_id())
 
         if not is_admin:
             allowed = await self.get_allowed_instances(sender_id)
-            if instance_name not in allowed:
-                yield event.plain_result(f"实例 {instance_name} 不在你的可操作范围内。")
+            if name not in allowed:
+                yield event.plain_result(f"实例 {name} 不在你的可操作范围内，请确认实例名或联系管理员。")
                 return
-            # 生成审批单
-            approval_id = await create_approval(
-                self,
-                action="switch_account",
-                params={"instance_name": instance_name},
-                requester_qq=sender_id,
-                group_id=str(event.get_group_id() or ""),
-                description=f"切换实例 {instance_name} 账号（申请者: {sender_id}）",
-            )
-            yield event.plain_result(
-                self._approval_notice_single("切换账号", approval_id)
-            )
-            return
 
-        yield event.plain_result(f"⏳ 正在重置实例 {instance_name} 的登录态并保留基础配置，请稍候…")
-
-        msg = await do_recreate_container(
-            self.client, instance_name, clean_data=True, keep_config=True
-        )
-        if "失败" in msg or "暂时无法确认" in msg:
-            yield event.plain_result(f"重置过程出现异常：{msg}")
-            return
-
-        yield event.plain_result("✅ 实例已重置并重启，正在生成新登录二维码…")
-
-        await asyncio.sleep(8)
-
-        results = await do_get_qrcode(self.client, instance_name)
-
-        if results and isinstance(results[0], str) and results[0].startswith("__qr_soon__:"):
-            wait_secs = int(results[0].split(":", 1)[1])
-            tip = results[1] if len(results) > 1 else f"当前二维码即将过期，稍等 {wait_secs} 秒后将自动重新获取…"
-            yield event.plain_result(tip)
-            await asyncio.sleep(wait_secs)
-            results = await do_get_qrcode(self.client, instance_name)
+        results = await do_get_qrcode(self.client, name)
 
         for item in results:
-            if isinstance(item, str) and not item.startswith("__qr_soon__:"):
+            if isinstance(item, str) and item.startswith("__qr_soon__:"):
+                secs = int(item.split(":", 1)[1])
+                yield event.plain_result(
+                    f"⚠️ 当前二维码仅剩约 {secs} 秒有效期，即将过期，请稍候几秒后重新发送请求。"
+                )
+            elif isinstance(item, str):
                 yield event.plain_result(item)
-            elif not isinstance(item, str):
+            else:
                 yield event.chain_result([item])
 
-    @llm_tool(name="check_ncqq_login_status")
-    async def check_login_status(self, event: AstrMessageEvent, instance_names: str):
-        """刷新并检查 ncqq 实例的实时登录状态，支持一次检查多个实例。
-
-        适用于用户询问某实例是否在线、是否掉线、是否扫码成功、是否仍需登录时。
-        此工具只返回状态文字信息，不返回二维码图片。
-        注意：如果用户请求"获取二维码""拉二维码""扫码"，不要调用此工具，应调用 get_ncqq_qrcode。
-
-        Args:
-            instance_names (string): 要检查登录状态的 ncqq 实例名，支持一次传入多个，用逗号分隔，例如 "bot1,bot2"。
-        """
-
-        names = [n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()]
-        if not names:
-            yield event.plain_result("没有识别到可操作的实例名，请至少提供一个实例名。")
-            return
-
-        sender_id = str(event.get_sender_id())
-        is_admin = event.is_admin()
-
-        if not is_admin:
-            allowed = await self.get_allowed_instances(sender_id)
-            rejected = [n for n in names if n not in allowed]
-            if rejected:
-                yield event.plain_result(
-                    f"你暂时不能查看这些实例的登录状态：{'、'.join(rejected)}。"
-                )
-                return
-
-        lines: list[str] = []
-        for name in names:
-            payload = await do_check_login_status(self.client, name)
-            logged_in = payload.get("logged_in", False)
-            uin = payload.get("uin", "")
-            nickname = payload.get("nickname", "")
-            if payload.get("status") == "error":
-                status_text = "⚠️ 获取失败，请稍后重试"
-            elif logged_in:
-                label = f"{nickname}({uin})" if uin else nickname or "已登录"
-                status_text = f"🟢 已在线（{label}）"
-            else:
-                status_text = "🔴 未登录（可能需重新扫码）"
-            lines.append(f"• {name}：{status_text}")
-        yield event.plain_result("\n".join(lines))
-
-    @llm_tool(name="monitor_ncqq_usage")
-    async def get_monitor(
-        self, event: AstrMessageEvent, instance_name: str, fetch_logs: bool = False
-    ):
-        """读取 ncqq 实例的监控信息或尾部日志。
-
-        适用于管理员查看资源占用、运行监控、容器日志。
-        不适用于普通状态问答、二维码获取、实例启停。
-
-        Args:
-            instance_name (string): 要查看监控信息的 ncqq 实例名。
-            fetch_logs (boolean): 为 true 时返回尾部日志；为 false 时返回监控摘要。
-        """
-        if not event.is_admin():
-            yield event.plain_result("此功能仅限管理员查看监控与日志。")
-            return
-
-        msg = await do_get_monitor(self.client, instance_name, fetch_logs)
-        yield event.plain_result(msg)
-
-    @llm_tool(name="create_ncqq_instance")
-    async def create_instance(self, event: AstrMessageEvent, instance_names: str):
-        """创建新的 ncqq 实例，支持一次创建多个。
-
-        仅在用户明确要求创建、初始化、生成实例时调用。
-        不要把绑定用户、接入后端、拉取二维码误判为创建实例。
-        管理员直接执行；其他用户提交审批由管理员确认后执行。
-
-        Args:
-            instance_names (string): 要创建的 ncqq 实例名。支持一次传入多个，用逗号分隔，例如 "bot1,bot2,bot3"。
-        """
-
-        names = [n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()]
-        if not names:
-            yield event.plain_result("没有识别到可操作的实例名，请至少提供一个实例名。")
-            return
-
-        if not event.is_admin():
-            sender_id = str(event.get_sender_id())
-            label = "、".join(names)
-            approval_id = await create_approval(
-                self,
-                action="create",
-                params={"instance_names": names},
-                requester_qq=sender_id,
-                group_id=str(event.get_group_id() or ""),
-                description=f"创建实例 {label}（申请者: {sender_id}）",
-            )
-            yield event.plain_result(
-                self._approval_notice_single("创建实例", approval_id)
-            )
-            return
-
-        results: list[str] = []
-        for name in names:
-            msg = await do_create_instance(self.client, name)
-            results.append(msg)
-        yield event.plain_result("\n".join(results))
-
-    @llm_tool(name="list_ncqq_assets")
-    async def list_assets(self, event: AstrMessageEvent):
-        """列出 ncqq 管理节点上的基础资产。
-
-        适用于管理员查询宿主机中的镜像、容器等基础资产清单。
-        不适用于具体实例状态、二维码、后端接入。
-        """
-        if not event.is_admin():
-            yield event.plain_result("此功能仅限管理员使用。")
-            return
-
-        msg = await do_list_assets(self.client)
-        yield event.plain_result(msg)
-
-    @llm_tool(name="read_ncqq_config")
-    async def read_config(
-        self,
-        event: AstrMessageEvent,
-        instance_name: str,
-        file_name: str = "onebot11_uin.json",
-    ):
-        """只读查看 ncqq 实例容器内的配置文件内容。
-
-        适用于管理员排查配置、核对文件内容、读取实例内部配置。
-        不会修改文件内容。
-
-        Args:
-            instance_name (string): 要读取配置的 ncqq 实例名。
-            file_name (string): 容器内要读取的文件名。默认值为 onebot11_uin.json。
-        """
-        if not event.is_admin():
-            yield event.plain_result("此功能仅限管理员使用。")
-            return
-
-        msg = await do_read_config(self.client, instance_name, file_name)
-        yield event.plain_result(msg)
-
-    @llm_tool(name="write_ncqq_config")
-    async def write_config(
-        self,
-        event: AstrMessageEvent,
-        instance_name: str,
-        file_name: str,
-        file_content: str,
-    ):
-        """覆写 ncqq 实例容器内的配置文件。
-
-        高风险操作，不适用于读取配置、查看状态、普通问答。
-        管理员直接执行；绑定用户可对自己绑定的实例提交审批，由管理员确认后执行。
-        未绑定该实例的用户无法提交此操作。
-
-        Args:
-            instance_name (string): 要写入配置的 ncqq 实例名。
-            file_name (string): 容器内要写入的目标文件名。
-            file_content (string): 要完整写入的文件内容，应为最终内容而不是增量片段。
-        """
-        if not event.is_admin():
-            sender_id = str(event.get_sender_id())
-            # Verify the requester has binding access to this instance
-            allowed = await self.get_allowed_instances(sender_id)
-            if instance_name not in allowed:
-                yield event.plain_result(
-                    f"实例 {instance_name} 当前不在你的可操作范围内，暂时不能提交配置修改申请。"
-                )
-                return
-            approval_id = await create_approval(
-                self,
-                action="write_config",
-                params={
-                    "instance_name": instance_name,
-                    "file_name": file_name,
-                    "file_content": file_content,
-                },
-                requester_qq=sender_id,
-                group_id=str(event.get_group_id() or ""),
-                description=f"覆写配置 {instance_name}/{file_name}（申请者: {sender_id}）",
-            )
-            yield event.plain_result(
-                self._approval_notice_single("覆写配置", approval_id)
-            )
-            return
-
-        msg = await do_write_config(self.client, instance_name, file_name, file_content)
-        yield event.plain_result(msg)
-
-    @llm_tool(name="list_ncqq_files")
-    async def list_files(
-        self,
-        event: AstrMessageEvent,
-        instance_name: str,
-        path: str = "",
-    ):
-        """列出 ncqq 实例数据目录下的文件和子目录。
-
-        适用于管理员排查文件、查看配置目录结构、核对数据文件。
-        不适用于读取文件内容（应使用 read_ncqq_config）或执行实例动作。
-
-        Args:
-            instance_name (string): 要查看文件目录的 ncqq 实例名。
-            path (string): 相对于实例数据根目录的路径，留空表示根目录。例如 'config' 或 'qq_data'。
-        """
-        if not event.is_admin():
-            yield event.plain_result("此功能仅限管理员使用。")
-            return
-
-        msg = await do_list_files(self.client, instance_name, path)
-        yield event.plain_result(msg)
