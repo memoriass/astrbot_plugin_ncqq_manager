@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from astrbot.api.all import AstrMessageEvent, llm_tool
+from astrbot.api.all import AstrMessageEvent
 
 from .actions import do_create_instance, do_inject_by_alias, do_instance_action, do_recreate_container
 from .approval import (
@@ -17,7 +17,6 @@ from .monitoring import do_get_radar_endpoints, do_save_radar_endpoints
 
 
 class AdminToolsMixin:
-    @llm_tool(name="ncqq_approval")
     async def ncqq_approval(
         self,
         event: AstrMessageEvent,

@@ -1,7 +1,10 @@
 import base64
+import logging
 import re
 
-from astrbot.api.all import AstrMessageEvent, Image, llm_tool
+from astrbot.api.all import AstrMessageEvent, Image
+from astrbot.api.star import StarTools
+from astrbot.core.message.message_event_result import MessageChain
 
 from .actions import do_create_instance, do_instance_action, do_recreate_container
 from .approval import create_approval
@@ -29,7 +32,6 @@ class InstanceToolsMixin:
         "delete":  ["destroy", "die"],
     }
 
-    @llm_tool(name="ncqq_query")
     async def ncqq_query(
         self,
         event: AstrMessageEvent,
@@ -159,7 +161,6 @@ class InstanceToolsMixin:
             f"未知查询类型 '{query}'，支持：instances / login / monitor / logs / assets / config / files。"
         )
 
-    @llm_tool(name="ncqq_action")
     async def ncqq_action(
         self,
         event: AstrMessageEvent,
@@ -346,7 +347,6 @@ class InstanceToolsMixin:
             results.append(msg)
         yield event.plain_result("\n".join(results))
 
-    @llm_tool(name="ncqq_qrcode")
     async def ncqq_qrcode(self, event: AstrMessageEvent, instance_name: str):
         """获取指定 ncqq 实例的登录二维码图片。
 
@@ -374,6 +374,12 @@ class InstanceToolsMixin:
 
         results = await do_get_qrcode(self.client, name)
 
+        # 判断是否需要私聊发送（群聊触发 + 配置开启）
+        is_group = bool(event.get_group_id())
+        qrcode_private = self.config.get("qrcode_private", True)
+        use_private = is_group and qrcode_private
+
+        has_image = False
         for item in results:
             if isinstance(item, str) and item.startswith("__qr_soon__:"):
                 secs = int(item.split(":", 1)[1])
@@ -382,6 +388,25 @@ class InstanceToolsMixin:
                 )
             elif isinstance(item, str):
                 yield event.plain_result(item)
+            elif use_private:
+                # 群聊中不直接发图，改为私聊
+                if not has_image:
+                    has_image = True
+                    yield event.plain_result("🔐 为防止他人误扫，二维码已通过私聊发送，请查收。")
+                try:
+                    chain = MessageChain()
+                    chain.chain.append(item)
+                    await StarTools.send_message_by_id(
+                        type="FriendMessage",
+                        id=sender_id,
+                        message_chain=chain,
+                    )
+                except Exception as e:
+                    logging.getLogger(__name__).warning(
+                        "私聊发送二维码失败 (QQ %s): %s", sender_id, e
+                    )
+                    yield event.plain_result("⚠️ 私聊发送失败，可能未添加好友。以下直接展示：")
+                    yield event.chain_result([item])
             else:
                 yield event.chain_result([item])
 

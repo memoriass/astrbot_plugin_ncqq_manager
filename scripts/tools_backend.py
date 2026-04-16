@@ -1,7 +1,7 @@
 import base64
 import re
 
-from astrbot.api.all import AstrMessageEvent, At, Image, llm_tool
+from astrbot.api.all import AstrMessageEvent, At, Image
 
 from .actions import do_inject_by_alias
 from .approval import create_approval
@@ -9,7 +9,6 @@ from .monitoring import do_get_radar_endpoints, do_save_radar_endpoints
 
 
 class BackendToolsMixin:
-    @llm_tool(name="ncqq_backend")
     async def ncqq_backend(
         self,
         event: AstrMessageEvent,
@@ -158,7 +157,6 @@ class BackendToolsMixin:
 
         yield event.plain_result(f"不支持的操作 '{action}'，支持：add / remove / inject。")
 
-    @llm_tool(name="ncqq_binding")
     async def ncqq_binding(
         self,
         event: AstrMessageEvent,
