@@ -6,9 +6,9 @@ from astrbot.api.all import AstrMessageEvent, Image
 from astrbot.api.star import StarTools
 from astrbot.core.message.message_event_result import MessageChain
 
-from .actions import do_create_instance, do_instance_action, do_recreate_container
+from .actions import do_create_instance, do_instance_action
 from .approval import create_approval
-from .config_manager import do_read_config, do_write_config
+from .config_manager import do_read_config
 from .html_renderer import render_bindings, render_instances
 from .interaction import do_check_login_status, do_get_qrcode
 from .monitoring import (
@@ -167,12 +167,10 @@ class InstanceToolsMixin:
         action: str,
         instance_names: str = "",
         delete_data: bool = False,
-        file_name: str = "",
-        file_content: str = "",
     ):
-        """对 ncqq 实例执行控制或写入操作，涵盖生命周期管理、创建、账号重置、配置覆写。
+        """对 ncqq 实例执行创建、销毁和生命周期控制。
 
-        当用户明确要求启动、停止、重启、删除、创建实例，或要求切换账号、覆写配置文件时调用。
+        仅供新 workflow 内部调用。账号重置和配置写入不在聊天 workflow 中开放。
         纯查询场景（查状态、看日志、读配置）请使用 ncqq_query；扫码请使用 ncqq_qrcode。
 
         Args:
@@ -184,13 +182,9 @@ class InstanceToolsMixin:
                 "unpause"      — 恢复容器进程。
                 "kill"         — 强制终止容器。
                 "delete"       — 销毁容器（delete_data 控制是否同时删除数据目录）。
-                "create"       — 创建新实例，支持一次传入多个名称。
-                "switch"       — 重置登录账号（保留配置、清空数据、重建容器）。完成后请再调 ncqq_qrcode 拉取新二维码。
-                "write_config" — 覆写实例容器内配置文件，需同时提供 file_name 和 file_content。
+                "create"       — 创建新实例，仅管理员直接执行。
             instance_names (string): 目标实例名，支持逗号分隔多个（create/start/stop 等均支持批量）。
             delete_data (boolean): 仅 action=delete 时有效。true 时同时删除本地数据目录（QQ数据/配置/插件/缓存，不可恢复）；false 时仅移除容器保留数据。用户说"彻底删除""删干净"时为 true，仅说"删除"时为 false。
-            file_name (string): 仅 action=write_config 时必填，容器内目标文件名。
-            file_content (string): 仅 action=write_config 时必填，要完整写入的文件内容（非增量）。
         """
         sender_id = str(event.get_sender_id())
         is_admin = event.is_admin()
@@ -203,15 +197,7 @@ class InstanceToolsMixin:
                 yield event.plain_result("请补充实例名（instance_names）。")
                 return
             if not is_admin:
-                aid = await create_approval(
-                    self,
-                    action="create",
-                    params={"instance_names": names},
-                    requester_qq=sender_id,
-                    group_id=str(event.get_group_id() or ""),
-                    description=f"创建实例 {'、'.join(names)}（申请者: {sender_id}）",
-                )
-                yield event.plain_result(self._approval_notice_single("创建实例", aid))
+                yield event.plain_result("创建实例请使用 create_instance workflow 提交整合审批。")
                 return
             results: list[str] = []
             for n in names:
@@ -220,64 +206,11 @@ class InstanceToolsMixin:
             yield event.plain_result("\n".join(results))
             return
 
-        # ── switch ──────────────────────────────────────────────────────────
-        if action == "switch":
-            name = (names[0] if names else "").strip()
-            if not name:
-                yield event.plain_result("请补充实例名（instance_names）。")
-                return
-            if not is_admin:
-                allowed = await self.get_allowed_instances(sender_id)
-                if name not in allowed:
-                    yield event.plain_result(f"实例 {name} 不在你的可操作范围内。")
-                    return
-                aid = await create_approval(
-                    self,
-                    action="switch_account",
-                    params={"instance_name": name},
-                    requester_qq=sender_id,
-                    group_id=str(event.get_group_id() or ""),
-                    description=f"切换实例 {name} 账号（申请者: {sender_id}）",
-                )
-                yield event.plain_result(self._approval_notice_single("切换账号", aid))
-                return
-            yield event.plain_result(f"⏳ 正在重置 {name} 的登录态（保留配置），请稍候…")
-            ok, msg = await do_recreate_container(self.client, name, clean_data=True, keep_config=True)
-            if not ok:
-                yield event.plain_result(f"重置失败：{msg}")
-                return
-            yield event.plain_result(f"✅ {msg}\n容器已重建，请调用 ncqq_qrcode 拉取新登录二维码。")
-            return
-
-        # ── write_config ─────────────────────────────────────────────────────
-        if action == "write_config":
-            name = (names[0] if names else "").strip()
-            if not name or not file_name or not file_content:
-                yield event.plain_result("write_config 需要同时提供 instance_names、file_name、file_content。")
-                return
-            if not is_admin:
-                allowed = await self.get_allowed_instances(sender_id)
-                if name not in allowed:
-                    yield event.plain_result(f"实例 {name} 不在你的可操作范围内，无法提交配置修改申请。")
-                    return
-                aid = await create_approval(
-                    self,
-                    action="write_config",
-                    params={"instance_name": name, "file_name": file_name, "file_content": file_content},
-                    requester_qq=sender_id,
-                    group_id=str(event.get_group_id() or ""),
-                    description=f"覆写配置 {name}/{file_name}（申请者: {sender_id}）",
-                )
-                yield event.plain_result(self._approval_notice_single("覆写配置", aid))
-                return
-            yield event.plain_result(await do_write_config(self.client, name, file_name, file_content))
-            return
-
         # ── lifecycle: start/stop/restart/pause/unpause/kill/delete ──────────
         _lifecycle = {"start", "stop", "restart", "pause", "unpause", "kill", "delete"}
         if action not in _lifecycle:
             yield event.plain_result(
-                f"不支持的操作 '{action}'。支持：start / stop / restart / pause / unpause / kill / delete / create / switch / write_config。"
+                f"不支持的操作 '{action}'。支持：start / stop / restart / pause / unpause / kill / delete / create。"
             )
             return
 

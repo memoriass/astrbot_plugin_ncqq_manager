@@ -6,14 +6,12 @@ import time
 
 from astrbot.api.all import AstrMessageEvent
 
-from .actions import do_create_instance, do_inject_by_alias, do_instance_action, do_recreate_container
+from .actions import do_create_instance, do_inject_by_alias, do_instance_action
 from .approval import (
     get_approval,
     list_approvals,
     remove_approval,
 )
-from .config_manager import do_write_config
-from .monitoring import do_get_radar_endpoints, do_save_radar_endpoints
 
 
 class AdminToolsMixin:
@@ -100,18 +98,12 @@ class AdminToolsMixin:
     async def _dispatch_approved_action(self, action: str, params: dict) -> str:
         """将已批准的审批记录分发到对应 handler 执行并返回结果文本。
 
-        支持的 action 键：delete / create / write_config / inject_backend /
-        switch_account / bind_instance / manage_backends_add / manage_backends_remove。
+        支持的 action 键：create_instance / delete / inject_backend。
         """
         handlers = {
+            "create_instance":       self._handle_create_instance_flow,
             "delete":                self._handle_delete,
-            "create":                self._handle_create,
-            "write_config":          self._handle_write_config,
             "inject_backend":        self._handle_inject_backend,
-            "switch_account":        self._handle_switch_account,
-            "bind_instance":         self._handle_bind_instance,
-            "manage_backends_add":   self._handle_manage_backends_add,
-            "manage_backends_remove": self._handle_manage_backends_remove,
         }
         handler = handlers.get(action)
         if handler is None:
@@ -122,6 +114,59 @@ class AdminToolsMixin:
             return "审批执行过程中出现异常，请稍后重试或检查后台日志。"
 
     # --- 各 action 的具体处理方法 ---
+
+    async def _handle_create_instance_flow(self, params: dict) -> str:
+        inst_name = params["instance_name"]
+        backend_alias = str(params.get("backend_alias") or "").strip()
+        bind_qq = str(params.get("bind_qq") or "").strip()
+        nickname = str(params.get("nickname") or "").strip()
+
+        results: list[str] = []
+        exists = False
+        try:
+            payload = await self.client.make_request("GET", "/api/containers")
+            containers = payload.get("containers", []) if isinstance(payload, dict) else []
+            exists = any(
+                str(item.get("name") or "").strip().lstrip("/") == inst_name
+                for item in containers
+                if isinstance(item, dict)
+            )
+        except Exception:
+            results.append("容器列表读取失败，将直接尝试创建。")
+
+        create_ok = exists
+        if exists:
+            results.append(f"实例 {inst_name} 已存在，跳过创建。")
+        else:
+            create_ok, msg = await do_create_instance(self.client, inst_name)
+            results.append(msg)
+
+        if create_ok and bind_qq:
+            mapping = await self.get_user_mapping()
+            if bind_qq not in mapping:
+                mapping[bind_qq] = {"nickname": "", "instances": []}
+            instances = mapping[bind_qq].setdefault("instances", [])
+            if inst_name not in instances:
+                instances.append(inst_name)
+                results.append(f"已绑定实例 {inst_name} -> QQ {bind_qq}。")
+            else:
+                results.append(f"实例 {inst_name} 与 QQ {bind_qq} 的绑定已存在。")
+            if nickname:
+                mapping[bind_qq]["nickname"] = nickname
+            await self.save_user_mapping(mapping)
+
+        if create_ok and backend_alias:
+            _, msg = await do_inject_by_alias(
+                self.client,
+                alias=backend_alias,
+                target="bs",
+                conn_id=inst_name,
+            )
+            results.append(f"后端接入 {backend_alias}: {msg}")
+
+        if create_ok:
+            results.append("后续登录请让用户执行登录恢复流程获取二维码。")
+        return "\n".join(results)
 
     async def _handle_delete(self, params: dict) -> str:
         inst_name = params["instance_name"]
@@ -141,65 +186,9 @@ class AdminToolsMixin:
                 msg += f"\n已自动解除所有用户与实例 {inst_name} 的绑定。"
         return msg
 
-    async def _handle_create(self, params: dict) -> str:
-        # 兼容旧格式（instance_name 单值）和新格式（instance_names 列表）
-        names = params.get("instance_names") or [params["instance_name"]]
-        results = []
-        for n in names:
-            _, msg = await do_create_instance(self.client, n)
-            results.append(msg)
-        return "\n".join(results)
-
-    async def _handle_write_config(self, params: dict) -> str:
-        return await do_write_config(
-            self.client, params["instance_name"], params["file_name"], params["file_content"]
-        )
-
     async def _handle_inject_backend(self, params: dict) -> str:
         _, msg = await do_inject_by_alias(
             self.client, alias=params["alias"], target="bs", conn_id=params["instance_name"]
         )
         return msg
-
-    async def _handle_switch_account(self, params: dict) -> str:
-        inst_name = params["instance_name"]
-        _, msg = await do_recreate_container(
-            self.client, inst_name, clean_data=True, keep_config=True
-        )
-        return f"{msg}\n审批已通过，账号重置完毕。请申请者稍后自行发送「获取二维码」来登录新账号。"
-
-    async def _handle_bind_instance(self, params: dict) -> str:
-        mapping = await self.get_user_mapping()
-        target_uid = params["target_uid"]
-        # 兼容旧格式（instance_name 单值）和新格式（instance_names 列表）
-        names = params.get("instance_names") or [params["instance_name"]]
-        nickname = params.get("nickname", "")
-        if target_uid not in mapping:
-            mapping[target_uid] = {"nickname": "", "instances": []}
-        added = [n for n in names if n not in mapping[target_uid]["instances"]]
-        mapping[target_uid]["instances"].extend(added)
-        if nickname:
-            mapping[target_uid]["nickname"] = nickname
-        await self.save_user_mapping(mapping)
-        added_str = "、".join(added) if added else "（均已存在，无新增）"
-        return f"绑定完成。目标QQ: {target_uid} | 新增实例: {added_str} | 昵称: {nickname or '无'}"
-
-    async def _handle_manage_backends_add(self, params: dict) -> str:
-        endpoints = await do_get_radar_endpoints(self.client)
-        alias, url, token = params["alias"], params["url"], params.get("token", "")
-        existing = next((e for e in endpoints if e.get("alias") == alias), None)
-        if existing:
-            existing["url"] = url
-            existing["token"] = token
-        else:
-            endpoints.append({"alias": alias, "url": url, "token": token})
-        result = await do_save_radar_endpoints(self.client, endpoints)
-        return f"后端端点 {alias} 已保存。{result}"
-
-    async def _handle_manage_backends_remove(self, params: dict) -> str:
-        endpoints = await do_get_radar_endpoints(self.client)
-        alias = params["alias"]
-        new_eps = [e for e in endpoints if e.get("alias") != alias]
-        result = await do_save_radar_endpoints(self.client, new_eps)
-        return f"后端端点 {alias} 已删除。{result}"
 

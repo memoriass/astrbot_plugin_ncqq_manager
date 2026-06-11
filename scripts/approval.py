@@ -30,12 +30,9 @@ _approval_lock = asyncio.Lock()
 
 # Actions that require Owner approval when triggered by a non-owner.
 APPROVAL_REQUIRED_ACTIONS: set[str] = {
+    "create_instance",  # create + optional bind/backend injection flow
     "delete",  # ncqq_instance_action with action=delete
-    "create",  # create_ncqq_instance
-    "write_config",  # write_ncqq_config
     "inject_backend",  # inject_backend_to_instance
-    "bind_instance",  # bind_ncqq_instance
-    "manage_backends",  # manage_ncqq_backends
 }
 
 # Seconds before a pending approval expires.

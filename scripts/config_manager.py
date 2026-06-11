@@ -39,25 +39,3 @@ async def do_read_config(client: NCQQClient, instance_name: str, file_name: str)
     except Exception as e:
         logger.warning("读取配置 %s/%s 失败: %s", instance_name, file_name, e)
         return "读取配置异常，请稍后重试。"
-
-
-async def do_write_config(
-    client: NCQQClient, instance_name: str, file_name: str, file_content: str
-) -> str:
-    """Write a config file into the container data directory.
-
-    New API POST /api/containers/{name}/config/{filename:path}
-    Request body: {content:"<raw string>"}  (plain string, not parsed JSON)
-    Response: {status:"ok"}
-    """
-    try:
-        safe_name = quote(file_name, safe="/")
-        await client.make_request(
-            "POST",
-            f"/api/containers/{instance_name}/config/{safe_name}",
-            json={"content": file_content},
-        )
-        return f"配置已保存，实例 {instance_name} 的 {file_name} 已更新。"
-    except Exception as e:
-        logger.warning("写入配置 %s/%s 失败: %s", instance_name, file_name, e)
-        return "写入配置异常，请稍后重试。"

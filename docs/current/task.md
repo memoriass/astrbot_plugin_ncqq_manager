@@ -1,4 +1,5 @@
-
-- commit=N/A diff=+100/-10 commands=python -m py_compile ... OK evidence=html_renderer.py L255
-- remeber.exec.1 label=avatar|fact=base_url concatenated for playwright|impact=renders correctly without download|next=none
-- remeber.exec.2 label=bindings|fact=added templates/bindings.html and list_ncqq_bindings tool|impact=ux improved from raw json|next=none
+- current=ncqq workflow-only refactor
+- fact=chat entrypoints now accept only explicit workflow IDs
+- workflows=create_instance,relogin_instance,control_instance,connect_backend,check_instance,list_instances,check_manager,delete_instance,review_approvals
+- removed=legacy command aliases, scope-based inspect routing, legacy approval actions, unused helper functions
+- next=reload AstrBot plugin and run one real create_instance/relogin_instance smoke test

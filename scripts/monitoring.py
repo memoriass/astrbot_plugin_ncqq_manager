@@ -122,23 +122,6 @@ async def do_get_radar_endpoints(client: NCQQClient) -> list:
         return []
 
 
-async def do_save_radar_endpoints(client: NCQQClient, endpoints: list) -> str:
-    """全量覆写服务端雷达端点库。endpoints 格式: [{alias, url, token}]"""
-    try:
-        res = await client.make_request(
-            "POST", "/api/botshepherd/radar/endpoints", json={"endpoints": endpoints}
-        )
-        count = (
-            res.get("count", len(endpoints))
-            if isinstance(res, dict)
-            else len(endpoints)
-        )
-        return f"雷达端点库已更新，共 {count} 条记录。"
-    except Exception as e:
-        logger.warning("端点库保存失败: %s", e)
-        return "端点库保存失败，请稍后重试。"
-
-
 async def do_get_stats(
     client: NCQQClient, instance_name: str
 ) -> dict:

@@ -1,4 +1,3 @@
-import json
 import logging
 import pathlib
 import re
@@ -15,12 +14,13 @@ from .scripts.html_renderer import cleanup_renderer, set_bg_dir
 from .scripts.tools_admin import AdminToolsMixin
 from .scripts.tools_backend import BackendToolsMixin
 from .scripts.tools_instance import InstanceToolsMixin
+from .scripts.workflows import run_ncqq_workflow, workflow_from_cli, workflow_from_tool
 
 logger = logging.getLogger(__name__)
 
 
 @register(
-    "ncqq_manager", "AstrBot", "NapCatQQ 容器控制与后端路由插件", "2.0.0", "repo_url"
+    "ncqq_manager", "AstrBot", "NapCatQQ 容器控制与后端路由插件", "2.0.1", "repo_url"
 )
 class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsMixin):
     def __init__(self, context: Context, config: dict):
@@ -89,329 +89,92 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsM
     async def ncqq_manager(
         self,
         event: AstrMessageEvent,
-        command: str,
+        workflow: str,
         target: str = "",
-        extra: str = "",
+        params: str = "",
     ):
-        """管理 NapCatQQ 机器人实例（Docker 容器）。当用户提及 ncqq、NapCat、QQ机器人、机器人实例、bot实例、容器实例 的查询或操控时调用。与系统状态、skill管理、其他插件无关。若用户未指定实例名（target 为空），系统会自动使用该用户唯一绑定的实例。
+        """Run a compiled internal ncqq workflow.
+
+        Use this tool only for ncqq / NapCatQQ instance and backend management.
+        The model must choose one workflow scenario and fill slots; the plugin
+        performs permission checks, target resolution, backend alias validation,
+        approval routing, and API calls internally.
+
+        Supported workflow scenarios:
+            create_instance - create or resume an instance flow; branches on
+                existence, permission, binding, backend injection, startup, and QR.
+            relogin_instance - check login state; fetch QR code only when needed.
+            control_instance - start/stop/restart/pause/unpause/kill with checks.
+            connect_backend - validate endpoint alias and inject it into one instance.
+            check_instance - admin-only existence/login/resource/log diagnosis.
+            list_instances - show instance state and binding overview.
+            check_backends - list configured backend endpoints.
+            check_manager - admin-only ncqq-manager dependency health check.
+            check_botshepherd - admin-only BotShepherd status check.
+            check_bot_runtime - admin-only known Bot WS runtime status.
+            read_bot_messages - admin-only recent messages for one Bot.
+            audit_operations - admin-only recent operation audit summary.
+            inspect_resources - admin-only image and node asset overview.
+            read_instance_config - admin-only file tree and optional config preview.
+            delete_instance - explicit-confirm delete flow.
+            review_approvals - admin-only pending approval view.
 
         Args:
-            command (string): 操作指令，必须是以下之一：
-                "list"             — 列出所有实例及运行状态。
-                "login"            — 检查实例登录状态（target=实例名，逗号分隔多个）。
-                "monitor"          — 查看实例资源占用（target=实例名，仅管理员）。
-                "logs"             — 查看实例日志（target=实例名，仅管理员）。
-                "assets"           — 列出镜像与节点资产（仅管理员）。
-                "config"           — 读取实例配置文件（target=实例名，extra可含file_name）。
-                "files"            — 列出实例文件目录（target=实例名，extra可含path）。
-                "qrcode"           — 获取登录二维码（target=实例名）。
-                "start"            — 启动实例（target=实例名）。
-                "stop"             — 停止实例（target=实例名）。
-                "restart"          — 重启实例（target=实例名）。
-                "pause"            — 暂停实例（target=实例名）。
-                "unpause"          — 恢复实例（target=实例名）。
-                "kill"             — 强杀实例（target=实例名）。
-                "delete"           — 销毁实例（target=实例名，extra可含delete_data布尔值）。
-                "create"           — 创建新实例（target=实例名，逗号分隔多个）。
-                "switch"           — 重置登录账号（target=实例名）。
-                "write_config"     — 覆写配置文件（target=实例名，extra含file_name和file_content）。
-                "bind"             — 绑定实例到@用户（target=实例名，extra可含nickname）。
-                "unbind"           — 解绑实例（target=实例名）。
-                "bindings"         — 查看所有绑定关系。
-                "nickname"         — 设置用户昵称（extra含qq_id和nickname）。
-                "backend_add"      — 添加后端端点（target=别名，extra含url和可选token）。
-                "backend_remove"   — 删除后端端点（target=别名）。
-                "backend_inject"   — 注入后端到实例（target=别名，extra可含instance_names或instance_keyword）。
-                "approval_list"    — 查看待审批请求。
-                "approval_approve" — 批准审批（target=审批ID）。
-                "approval_reject"  — 拒绝审批（target=审批ID，extra可含reason）。
-            target (string): 主要目标。实例操作为实例名，审批操作为审批ID，后端操作为别名。逗号分隔支持多个。
-            extra (string): 附加参数，JSON格式。可选键：file_name, file_content, path, delete_data, url, token, nickname, instance_names, instance_keyword, reason, qq_id。
+            workflow: One workflow scenario id from the list above.
+            target: Target instance name when the scenario works on one instance.
+                When omitted and the user has exactly one bound instance, the
+                plugin resolves it automatically.
+            params: Optional JSON object. Common fields:
+                create_instance: {"backend_alias":"alias","bind_qq":"123","qrcode":true}
+                control_instance: {"action":"restart","check_after":true}
+                connect_backend: {"backend_alias":"alias"}
+                read_bot_messages: {"limit":20}
+                read_instance_config: {"file_name":"onebot11_uin.json","path":"config"}
+                delete_instance: {"confirm":true,"delete_data":false}
         """
-        params = {}
-        if extra:
-            try:
-                params = json.loads(extra)
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-        # --- auto-resolve target when user has exactly one bound instance ---
-        _needs_target = {
-            "login", "monitor", "logs", "config", "files", "qrcode",
-            "start", "stop", "restart", "pause", "unpause", "kill",
-            "delete", "switch", "write_config",
-        }
-        if command in _needs_target and not target.strip():
-            sender_id = str(event.get_sender_id())
-            bound = await self.get_allowed_instances(sender_id)
-            if len(bound) == 1:
-                target = bound[0]
-            elif len(bound) > 1:
-                yield event.plain_result(
-                    f"你绑定了 {len(bound)} 个实例，请指定目标实例名：{'、'.join(bound)}"
-                )
-                return
-            # bound == 0 → 继续走原逻辑，由子方法报错
-
-        # --- query commands ---
-        if command == "list":
-            async for r in self.ncqq_query(event, query="instances"):
-                yield r
-            return
-        if command in ("login", "monitor", "logs", "config", "files"):
-            async for r in self.ncqq_query(
-                event,
-                query=command,
-                instance_names=target,
-                file_name=params.get("file_name", "onebot11_uin.json"),
-                path=params.get("path", ""),
-            ):
-                yield r
-            return
-        if command == "assets":
-            async for r in self.ncqq_query(event, query="assets"):
-                yield r
-            return
-        # --- qrcode ---
-        if command == "qrcode":
-            async for r in self.ncqq_qrcode(event, instance_name=target):
-                yield r
-            return
-        # --- action commands ---
-        _actions = {
-            "start", "stop", "restart", "pause", "unpause", "kill",
-            "delete", "create", "switch", "write_config",
-        }
-        if command in _actions:
-            async for r in self.ncqq_action(
-                event,
-                action=command,
-                instance_names=target,
-                delete_data=params.get("delete_data", False),
-                file_name=params.get("file_name", ""),
-                file_content=params.get("file_content", ""),
-            ):
-                yield r
-            return
-        # --- binding commands ---
-        if command in ("bind", "unbind", "bindings", "nickname"):
-            action = "list" if command == "bindings" else command
-            async for r in self.ncqq_binding(
-                event,
-                action=action,
-                instance_names=target,
-                qq_id=params.get("qq_id", ""),
-                nickname=params.get("nickname", ""),
-            ):
-                yield r
-            return
-        # --- backend commands ---
-        if command.startswith("backend_"):
-            action = command[len("backend_"):]
-            async for r in self.ncqq_backend(
-                event,
-                action=action,
-                alias=target,
-                url=params.get("url", ""),
-                token=params.get("token", ""),
-                instance_names=params.get("instance_names", ""),
-                instance_keyword=params.get("instance_keyword", ""),
-            ):
-                yield r
-            return
-        # --- approval commands ---
-        if command.startswith("approval_"):
-            action = command[len("approval_"):]
-            async for r in self.ncqq_approval(
-                event,
-                action=action,
-                approval_id=target,
-                reason=params.get("reason", ""),
-            ):
-                yield r
-            return
-        yield event.plain_result(
-            f"未知命令 '{command}'。支持：list / login / qrcode / start / stop / restart / "
-            f"create / delete / bind / unbind / bindings / backend_add / approval_list 等。"
-        )
+        request = workflow_from_tool(workflow, target, params)
+        async for r in run_ncqq_workflow(self, event, request):
+            yield r
 
     # ------------------------------------------------------------------
-    # Fixed command entry point: /ncqq <sub> [args...]
+    # Workflow debug entry point: /ncqq <scenario> [args...]
     # ------------------------------------------------------------------
 
     _NCQQ_HELP = (
-        "NapCatQQ 管理命令（绑定单实例时可省略名称）：\n"
-        "ncqq list                      — 列出所有实例\n"
-        "ncqq login [名称]              — 查看登录状态\n"
-        "ncqq qrcode [名称]             — 获取登录二维码\n"
-        "ncqq start|stop|restart [名称] — 生命周期管理\n"
-        "ncqq create <名称>             — 创建实例\n"
-        "ncqq delete [名称] [purge]     — 销毁实例\n"
-        "ncqq switch [名称]             — 重置账号\n"
-        "ncqq monitor [名称]            — 资源监控（管理员）\n"
-        "ncqq logs [名称]               — 查看日志（管理员）\n"
-        "ncqq config [名称] [文件名]    — 读取配置（管理员）\n"
-        "ncqq files [名称] [路径]       — 列出文件（管理员）\n"
-        "ncqq assets                    — 查看资产（管理员）\n"
-        "ncqq bind <实例名>             — 绑定实例（@目标用户）\n"
-        "ncqq unbind <实例名>           — 解绑实例（@目标用户）\n"
-        "ncqq bindings                  — 查看绑定\n"
-        "ncqq nick <QQ号> <昵称>        — 设置昵称\n"
-        "ncqq backend add <别名> <地址> — 添加后端\n"
-        "ncqq backend remove <别名>     — 删除后端\n"
-        "ncqq backend inject <别名>     — 注入后端到实例\n"
-        "ncqq approvals                 — 查看审批\n"
-        "ncqq approve <ID>              — 批准审批\n"
-        "ncqq reject <ID> [原因]        — 拒绝审批"
+        "ncqq workflow 调试入口：\n"
+        "ncqq create_instance <实例> [端点别名] - 创建流程\n"
+        "ncqq relogin_instance [实例]           - 掉线重登流程\n"
+        "ncqq control_instance <动作> [实例]    - 控制流程：start/stop/restart/pause/unpause/kill\n"
+        "ncqq connect_backend <端点别名> [实例] - 后端接入流程\n"
+        "ncqq check_instance [实例]             - 实例检测流程，管理员限定\n"
+        "ncqq list_instances                    - 实例列表流程\n"
+        "ncqq check_backends                     - 后端端点检测流程\n"
+        "ncqq check_manager                      - 管理器健康检测流程，管理员限定\n"
+        "ncqq check_botshepherd                  - BotShepherd 检测流程，管理员限定\n"
+        "ncqq check_bot_runtime                  - Bot 运行态检测流程，管理员限定\n"
+        "ncqq read_bot_messages <实例> [条数]   - Bot 消息读取流程，管理员限定\n"
+        "ncqq audit_operations [条数]            - 操作审计流程，管理员限定\n"
+        "ncqq inspect_resources                  - 资源检测流程，管理员限定\n"
+        "ncqq read_instance_config <实例> [文件] [路径] - 配置读取流程，管理员限定\n"
+        "ncqq delete_instance <实例> confirm [data] - 销毁流程；data 表示同时删数据\n"
+        "ncqq review_approvals                   - 审批队列流程"
     )
 
     @filter.command("ncqq")
     async def cmd_ncqq(self, event: AstrMessageEvent, sub: str = "help", args: GreedyStr = ""):
-        parts = str(args).split() if args else []
-
-        if sub in ("help", "h"):
+        if sub in ("help", "h", ""):
             yield event.plain_result(self._NCQQ_HELP)
             return
 
-        # --- auto-resolve instance name for commands that need one ---
-        _needs_inst = {
-            "login", "monitor", "logs", "config", "files", "qrcode",
-            "start", "stop", "restart", "pause", "unpause", "kill",
-            "delete", "switch",
-        }
-        args_str = str(args).strip()
-        if sub in _needs_inst and not args_str:
-            sender_id = str(event.get_sender_id())
-            bound = await self.get_allowed_instances(sender_id)
-            if len(bound) == 1:
-                args_str = bound[0]
-                parts = [args_str]
-            elif len(bound) > 1:
-                yield event.plain_result(
-                    f"你绑定了 {len(bound)} 个实例，请指定目标实例名：{'、'.join(bound)}"
-                )
-                return
-            # bound == 0 → 继续走原逻辑，由子方法报错
-
-        # --- query ---
-        if sub == "list":
-            async for r in self.ncqq_query(event, query="instances"):
-                yield r
-            return
-        if sub == "login":
-            async for r in self.ncqq_query(event, query="login", instance_names=args_str):
-                yield r
-            return
-        if sub in ("monitor", "logs"):
-            name = parts[0] if parts else args_str
-            async for r in self.ncqq_query(event, query=sub, instance_names=name):
-                yield r
-            return
-        if sub == "assets":
-            async for r in self.ncqq_query(event, query="assets"):
-                yield r
-            return
-        if sub == "config":
-            name = parts[0] if parts else args_str
-            file_name = parts[1] if len(parts) > 1 else "onebot11_uin.json"
-            async for r in self.ncqq_query(event, query="config", instance_names=name, file_name=file_name):
-                yield r
-            return
-        if sub == "files":
-            name = parts[0] if parts else args_str
-            path = parts[1] if len(parts) > 1 else ""
-            async for r in self.ncqq_query(event, query="files", instance_names=name, path=path):
-                yield r
+        request = workflow_from_cli(sub, args)
+        if request is None:
+            yield event.plain_result(
+                f"不支持的 ncqq workflow：{sub}。发送 /ncqq help 查看可用场景。"
+            )
             return
 
-        # --- qrcode ---
-        if sub == "qrcode":
-            async for r in self.ncqq_qrcode(event, instance_name=args_str):
-                yield r
-            return
-
-        # --- lifecycle actions ---
-        _lifecycle = {"start", "stop", "restart", "pause", "unpause", "kill"}
-        if sub in _lifecycle:
-            async for r in self.ncqq_action(event, action=sub, instance_names=args_str):
-                yield r
-            return
-        if sub == "create":
-            async for r in self.ncqq_action(event, action="create", instance_names=str(args)):
-                yield r
-            return
-        if sub == "delete":
-            name = parts[0] if parts else args_str
-            purge = len(parts) > 1 and parts[1].lower() in ("purge", "true", "彻底")
-            async for r in self.ncqq_action(event, action="delete", instance_names=name, delete_data=purge):
-                yield r
-            return
-        if sub == "switch":
-            async for r in self.ncqq_action(event, action="switch", instance_names=args_str):
-                yield r
-            return
-
-        # --- bindings ---
-        if sub == "bind":
-            async for r in self.ncqq_binding(event, action="bind", instance_names=str(args)):
-                yield r
-            return
-        if sub == "unbind":
-            async for r in self.ncqq_binding(event, action="unbind", instance_names=str(args)):
-                yield r
-            return
-        if sub == "bindings":
-            async for r in self.ncqq_binding(event, action="list"):
-                yield r
-            return
-        if sub == "nick":
-            qq_id = parts[0] if parts else ""
-            nickname = " ".join(parts[1:]) if len(parts) > 1 else ""
-            async for r in self.ncqq_binding(event, action="nickname", qq_id=qq_id, nickname=nickname):
-                yield r
-            return
-
-        # --- backend ---
-        if sub == "backend":
-            bsub = parts[0] if parts else ""
-            if bsub == "add":
-                alias = parts[1] if len(parts) > 1 else ""
-                url = parts[2] if len(parts) > 2 else ""
-                token = parts[3] if len(parts) > 3 else ""
-                async for r in self.ncqq_backend(event, action="add", alias=alias, url=url, token=token):
-                    yield r
-                return
-            if bsub == "remove":
-                alias = parts[1] if len(parts) > 1 else ""
-                async for r in self.ncqq_backend(event, action="remove", alias=alias):
-                    yield r
-                return
-            if bsub == "inject":
-                alias = parts[1] if len(parts) > 1 else ""
-                inst = " ".join(parts[2:]) if len(parts) > 2 else ""
-                async for r in self.ncqq_backend(event, action="inject", alias=alias, instance_names=inst):
-                    yield r
-                return
-            yield event.plain_result("用法：/ncqq backend add|remove|inject <参数>")
-            return
-
-        # --- approvals ---
-        if sub == "approvals":
-            async for r in self.ncqq_approval(event, action="list"):
-                yield r
-            return
-        if sub == "approve":
-            async for r in self.ncqq_approval(event, action="approve", approval_id=str(args).strip()):
-                yield r
-            return
-        if sub == "reject":
-            aid = parts[0] if parts else ""
-            reason = " ".join(parts[1:]) if len(parts) > 1 else ""
-            async for r in self.ncqq_approval(event, action="reject", approval_id=aid, reason=reason):
-                yield r
-            return
-
-        yield event.plain_result(f"未知子命令 '{sub}'。发送 ncqq help 查看帮助。")
+        async for r in run_ncqq_workflow(self, event, request):
+            yield r
 
     # ------------------------------------------------------------------
     # User mapping KV helpers
