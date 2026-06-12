@@ -7,7 +7,7 @@ Priority chain:
 from __future__ import annotations
 
 import datetime
-import logging
+import html
 import os
 import pathlib
 import random
@@ -15,7 +15,7 @@ import struct
 import tempfile
 from typing import Union
 
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 _TEMPLATE_PATH = pathlib.Path(__file__).parent.parent / "templates" / "instances.html"
 
@@ -44,6 +44,10 @@ _DEFAULT_BODY_W = 560
 # Playwright 浏览器复用：全局单例，避免每次截图都 launch/close
 _browser_instance = None
 _playwright_instance = None
+
+
+def _html(value: object, *, quote: bool = True) -> str:
+    return html.escape(str(value or ""), quote=quote)
 
 
 def set_bg_dir(path: pathlib.Path) -> None:
@@ -77,7 +81,7 @@ def _image_width(data: bytes) -> int:
             if data[12:16] == b'VP8 ':
                 return (struct.unpack('<H', data[26:28])[0]) & 0x3FFF
             # WebP VP8L
-            if data[12:17] == b'VP8L\x00'[:4]:
+            if data[12:16] == b'VP8L':
                 bits = struct.unpack('<I', data[21:25])[0]
                 return (bits & 0x3FFF) + 1
     except Exception:
@@ -166,12 +170,11 @@ def _build_card(c: dict, rank: int) -> str:
         state = "online"
         badge_text = "ONLINE"
 
-    name        = c.get("name", "—")
-    uin         = c.get("uin", "")
+    name        = _html(c.get("name", "—"))
+    uin         = _html(c.get("uin", ""))
     heartbeat   = _ts_to_str(c.get("bot_heartbeat_ts", 0))
-    login_info  = _login_label(c)
-    # 管理器直接提供的头像（base64 data-URI 或 https URL 均可）
-    bot_avatar  = c.get("bot_avatar", "")
+    login_info  = _html(_login_label(c))
+    bot_avatar  = _html(c.get("bot_avatar", ""))
 
     uin_display = uin or "—"
 
@@ -272,12 +275,13 @@ async def render_bindings(mapping: dict) -> bytes | str:
     # 构建行数据
     rows_html = ""
     for uid, data in mapping.items():
-        nickname = data.get("nickname") or "未设置"
+        safe_uid = _html(uid)
+        nickname = _html(data.get("nickname") or "未设置")
         instances = data.get("instances") or []
-        inst_str = "、".join(instances) if instances else "（暂无实例）"
+        inst_str = _html("、".join(str(item) for item in instances) if instances else "（暂无实例）")
         rows_html += f'''
         <div class="row">
-            <div class="col uid">{uid}</div>
+            <div class="col uid">{safe_uid}</div>
             <div class="col nick">{nickname}</div>
             <div class="col inst">{inst_str}</div>
         </div>

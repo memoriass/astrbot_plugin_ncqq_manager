@@ -1,55 +1,131 @@
 # ncqq 内部 Workflow 设计
 
-聊天侧只暴露“按能力方向落地”的 workflow。模型先判断用户意图，再选择一个具体 workflow；底层 API 调用、权限判断、审批、分支条件都在该 workflow 内部完成。
+聊天侧优先暴露少量主 workflow。模型先判断用户意图大类，再由主 workflow 根据 `intent` / `scope` 拼接到细分流程；底层 API 调用、权限判断、审批、分支条件都在流程内部完成。
 
 核心原则：
 
-- 一个 workflow 只负责一个能力方向。
+- 主 workflow 负责聊天场景下的意图大类。
+- 细分 workflow 仍可直接调用，用于确定性调试或模型已经明确知道目标流程时。
 - workflow 是完整流程，不是单个 API 包装。
 - 只接受新 workflow ID，不保留旧入口兼容。
 - 不再把 `scope` 当作主要公开接口。
 
-## 公开 Workflow
+## 主 Workflow
 
 | workflow | 能力方向 | 说明 |
 | --- | --- | --- |
-| `create_instance` | 创建流程 | 创建或接续创建实例，按条件绑定用户、启动实例、接入后端、拉二维码 |
-| `relogin_instance` | 掉线重登流程 | 检查登录状态，离线时拉二维码，可选先重启 |
-| `control_instance` | 控制流程 | 启动、停止、重启、暂停、恢复、强杀 |
-| `connect_backend` | 后端接入流程 | 校验端点别名和目标实例，再注入已有后端 |
-| `check_instance` | 实例检测流程 | 检查实例存在、登录、资源、日志，可选文件/配置 |
-| `list_instances` | 实例列表流程 | 查看实例状态和绑定关系 |
-| `check_backends` | 后端端点检测流程 | 查看已配置后端端点，不显示 token 明文 |
-| `check_manager` | 管理器健康检测流程 | 检测 ncqq-manager、Docker、状态引擎等 |
-| `check_botshepherd` | BotShepherd 检测流程 | 检测 BotShepherd 进程、激活、心跳 |
-| `check_bot_runtime` | Bot 运行态检测流程 | 查看 Bot WS 连接与账号运行态 |
-| `read_bot_messages` | Bot 消息读取流程 | 读取指定 Bot 最近消息 |
-| `audit_operations` | 操作审计流程 | 查看最近操作日志 |
-| `inspect_resources` | 资源检测流程 | 查看镜像与节点资产 |
-| `read_instance_config` | 配置读取流程 | 查看实例文件树和指定配置文件 |
-| `delete_instance` | 销毁流程 | 显式确认后删除实例，可选删除数据目录 |
-| `review_approvals` | 审批队列流程 | 管理员查看待审批请求 |
+| `manage_instance` | 实例主流程 | 根据 `intent` 路由到创建、重登、控制、接后端、检测、列表、销毁 |
+| `query` | 查询主流程 | 根据 `scope` 路由到实例、后端、健康、消息、审计、资源、配置查询 |
+| `manage_backend` | 后端主流程 | 根据 `intent` 查看后端端点或接入后端 |
+| `review_approvals` | 审批队列流程 | 管理员查看、批准或驳回待审批请求 |
+
+## 细分 Workflow
+
+以下入口保留直接调用能力，但默认不作为聊天侧首选：
+
+| workflow | 能力方向 | 说明 |
+| --- | --- | --- |
+| `create_instance` | 创建流程 | `manage_instance intent=create` 的目标流程 |
+| `relogin_instance` | 掉线重登流程 | `manage_instance intent=recover` 的目标流程 |
+| `control_instance` | 控制流程 | `manage_instance intent=control/action=start|stop|restart|...` 的目标流程 |
+| `connect_backend` | 后端接入流程 | `manage_instance intent=connect` 或 `manage_backend intent=connect` 的目标流程 |
+| `check_instance` | 实例检测流程 | `query scope=instance` 或 `manage_instance intent=check` 的目标流程 |
+| `list_instances` | 实例列表流程 | `query scope=instances` 或 `manage_instance intent=list` 的目标流程 |
+| `check_backends` | 后端端点检测流程 | `query scope=backends` 或 `manage_backend intent=list` 的目标流程 |
+| `check_health` | 综合健康检查流程 | `query scope=health` 的目标流程 |
+| `read_bot_messages` | Bot 消息读取流程 | `query scope=messages` 的目标流程 |
+| `audit_operations` | 操作审计流程 | `query scope=audit` 的目标流程 |
+| `inspect_resources` | 资源检测流程 | `query scope=resources` 的目标流程 |
+| `read_instance_config` | 配置读取流程 | `query scope=config` 的目标流程 |
+| `delete_instance` | 销毁流程 | `manage_instance intent=delete` 的目标流程 |
+
+## 响应群白名单
+
+配置 `enable_group_whitelist=true` 后，插件只响应 `response_groups` 中列出的群聊。
+`response_groups` 支持逗号、空格、顿号分隔多个群号。
+
+该限制作用于：
+
+- LLM 工具入口 `ncqq_manager`
+- `/ncqq` 调试命令
+- 群内审批快捷回复
+
+私聊不受响应群白名单限制，用于管理员或绑定用户做必要排障。
+
+## OneBot v11 群聊判定
+
+当前正式群聊场景只按 OneBot v11 标准消息考虑，不为 WeChat 适配器做额外分支。
+AstrBot 使用 `aiocqhttp` 反向 WebSocket，协议端连接 `/ws`，消息必须使用数组格式：
+
+```json
+[
+  {"type": "at", "data": {"qq": "123456"}},
+  {"type": "text", "data": {"text": " ncqq 当前健康状态怎么样？"}}
+]
+```
+
+判定顺序：
+
+- 原始文本显式以唤醒前缀调用 `/ncqq` 时，进入调试命令入口，例如 `/ncqq query health detail` 或 `@bot /ncqq query health detail`。
+- 群内 `@bot ncqq ...` 是自然语言请求，不进入 `/ncqq` 调试命令，由 AstrBot LLM 判断是否调用 `ncqq_manager`。
+- 询问“整体健康 / 管理器和实例是否正常 / 后端状态”时，优先调用 `ncqq_manager`，参数为 `workflow=query`、`params.scope=health`，需要细节时加 `params.details=true`。
+- 普通聊天未提到 ncqq、NapCatQQ、实例、后端、管理器、BotShepherd 等管理语义时，不应调用本插件工具。
+
+## 群审批交互
+
+普通用户在 QQ 群内触发高权限操作时，workflow 会创建审批记录，并用真实 At 组件提醒 AstrBot 管理员。
+审批记录会进入 `pending_approvals` 任务队列；用户侧不直接执行高权限动作，等待管理员处理。
+管理员通过 Astr 的 `review_approvals` / 审批队列入口读取并处理待审批任务，不做额外私聊或群外推送。
+
+管理员可用两种方式处理审批：
+
+- 直接回复审批 ID：`批准 ABC123`、`拒绝 ABC123`
+- 引用机器人发出的审批消息：只回复 `批准` 或 `拒绝`
+- 通过 Astr 入口：`review_approvals approve ABC123`、`review_approvals reject ABC123`
+
+审批回复只识别明确的开头命令：`批准`、`同意`、`通过`、`确认`、`拒绝`、`驳回`、`否决`、`取消`。
+引用审批消息时，插件必须能从被引用消息文本中解析出审批 ID；如果平台未返回引用文本，需要管理员显式带 ID。
+批量审批消息包含多个审批 ID 时，引用回复 `批准` / `拒绝` 不会直接处理全部，避免误删或误接入。管理员需要带具体 ID，或明确回复 `批准全部` / `拒绝全部`。
+
+```mermaid
+flowchart TD
+    A["普通用户触发高权限 workflow"] --> B["创建 pending_approvals 记录"]
+    B --> C["群内发送审批消息，并 At 管理员"]
+    C --> D{"管理员如何回复"}
+    D -- "批准/拒绝 + 审批 ID" --> E["按 ID 读取审批记录"]
+    D -- "引用审批消息 + 批准/拒绝" --> F["从引用消息解析审批 ID"]
+    F --> G{"是否解析到 ID"}
+    G -- "否" --> G0["停止：要求管理员显式带 ID"]
+    G -- "是" --> G1{"引用消息有多个 ID"}
+    G1 -- "是，未写全部" --> G2["停止：要求指定 ID 或明确全部"]
+    G1 -- "否" --> E
+    E --> H{"审批记录有效"}
+    H -- 否 --> H1["提示已处理或已过期"]
+    H -- 是且批准 --> I["执行 create/delete/inject_backend"]
+    H -- 是且拒绝 --> J["移除审批记录"]
+    I --> K["返回执行结果并移除审批记录"]
+    J --> L["返回驳回结果"]
+```
 
 ## 选择规则
 
 | 用户意图 | 选择 workflow |
 | --- | --- |
-| “创建一个实例 / 开一个 bot / 给某人开通” | `create_instance` |
-| “掉线了 / 重新登录 / 获取二维码 / 扫码” | `relogin_instance` |
-| “重启 / 启动 / 停止 / 暂停” | `control_instance` |
-| “把某个后端接到实例上” | `connect_backend` |
-| “这个实例有什么问题 / 看日志 / 看资源占用” | `check_instance` |
-| “有哪些实例 / 当前状态” | `list_instances` |
-| “有哪些后端端点” | `check_backends` |
-| “管理器健康 / Docker 是否正常” | `check_manager` |
-| “BotShepherd 是否正常” | `check_botshepherd` |
-| “Bot 是否连接 / 账号运行态” | `check_bot_runtime` |
-| “看某个 Bot 最近消息” | `read_bot_messages` |
-| “谁操作过 / 最近变更” | `audit_operations` |
-| “有哪些镜像 / 节点资源” | `inspect_resources` |
-| “看配置 / 看文件” | `read_instance_config` |
-| “删除 / 销毁实例” | `delete_instance` |
-| “有哪些审批” | `review_approvals` |
+| “创建一个实例 / 开一个 bot / 给某人开通” | `manage_instance`，`intent=create` |
+| “掉线了 / 重新登录 / 获取二维码 / 扫码” | `manage_instance`，`intent=recover` |
+| “重启 / 启动 / 停止 / 暂停” | `manage_instance`，`intent=control`，带 `action` |
+| “把某个后端接到实例上” | `manage_backend`，`intent=connect` |
+| “这个实例有什么问题 / 看日志 / 看资源占用” | `query`，`scope=instance` |
+| “有哪些实例 / 当前状态” | `query`，`scope=instances` |
+| “有哪些后端端点” | `query`，`scope=backends` |
+| “整体健康 / 当前是否正常 / 管理器和 Bot 状态” | `query`，`scope=health` |
+| “管理器 / Docker / BotShepherd / Bot 连接细节” | `query`，`scope=health`，设置 `details=true` |
+| “看某个 Bot 最近消息” | `query`，`scope=messages` |
+| “谁操作过 / 最近变更” | `query`，`scope=audit` |
+| “有哪些镜像 / 节点资源” | `query`，`scope=resources` |
+| “看配置 / 看文件” | `query`，`scope=config` |
+| “删除 / 销毁实例” | `manage_instance`，`intent=delete` |
+| “有哪些审批 / 批准或拒绝审批” | `review_approvals` |
 
 ## 创建流程
 
@@ -133,9 +209,36 @@ flowchart TD
     H --> I
 ```
 
+## 综合健康检查流程
+
+```mermaid
+flowchart TD
+    A["check_health"] --> B["并发读取健康子项"]
+    B --> C["/api/health"]
+    B --> D["BotShepherd status / activation / heartbeat"]
+    B --> E["/api/bots"]
+    B --> F["/api/containers"]
+    B --> G["后端端点列表"]
+    C --> H["汇总 manager 状态"]
+    D --> I["汇总 BotShepherd 状态"]
+    E --> J["汇总 Bot 在线数"]
+    F --> K["汇总实例运行数"]
+    G --> L["汇总后端端点数"]
+    H --> M{"是否 details=true"}
+    I --> M
+    J --> M
+    K --> M
+    L --> M
+    M -- 否 --> N["输出一屏健康摘要"]
+    M -- 是 --> O["摘要后追加细分诊断详情"]
+```
+
 ## 调试命令
 
 ```text
+ncqq manage_instance <intent> [args]
+ncqq query [scope] [target]
+ncqq manage_backend [list|connect] ...
 ncqq create_instance <实例> [端点别名]
 ncqq relogin_instance [实例]
 ncqq control_instance <start|stop|restart|pause|unpause|kill> [实例]
@@ -143,13 +246,11 @@ ncqq connect_backend <端点别名> [实例]
 ncqq check_instance [实例]
 ncqq list_instances
 ncqq check_backends
-ncqq check_manager
-ncqq check_botshepherd
-ncqq check_bot_runtime
+ncqq check_health [detail]
 ncqq read_bot_messages <实例> [条数]
 ncqq audit_operations [条数]
 ncqq inspect_resources
 ncqq read_instance_config <实例> [文件] [路径]
 ncqq delete_instance <实例> confirm [data]
-ncqq review_approvals
+ncqq review_approvals [approve|reject <审批ID>]
 ```

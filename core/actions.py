@@ -1,8 +1,5 @@
-import logging
-
-from .api import NCQQClient
-
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
+from .client import NCQQClient
 
 
 def _action_label(action: str) -> str:

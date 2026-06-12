@@ -1,10 +1,7 @@
-import logging
-
+from astrbot.api import logger
 from astrbot.api.all import Image
 
-from .api import NCQQClient
-
-logger = logging.getLogger(__name__)
+from .client import NCQQClient
 
 
 async def do_check_login_status(client: NCQQClient, instance_name: str) -> dict:

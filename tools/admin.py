@@ -6,11 +6,10 @@ import time
 
 from astrbot.api.all import AstrMessageEvent
 
-from .actions import do_create_instance, do_inject_by_alias, do_instance_action
-from .approval import (
-    get_approval,
+from ..core.actions import do_create_instance, do_inject_by_alias, do_instance_action
+from ..core.approval import (
+    claim_approval,
     list_approvals,
-    remove_approval,
 )
 
 
@@ -35,7 +34,7 @@ class AdminToolsMixin:
             approval_id (string): approve/reject 时必填，六位审批 ID（大小写不敏感），例如 'AB12CD'。
             reason (string): 仅 action=reject 时有效，可选拒绝原因。
         """
-        if not event.is_admin():
+        if not self.is_plugin_admin(event):
             yield event.plain_result("此功能仅限 AstrBot 管理员使用。")
             return
 
@@ -61,13 +60,12 @@ class AdminToolsMixin:
             if not aid:
                 yield event.plain_result("请提供审批 ID（approval_id）。")
                 return
-            record = await get_approval(self, aid)
+            record = await claim_approval(self, aid)
             if not record:
                 yield event.plain_result(f"未找到编号 [{aid}] 的审批请求，可能已处理或已过期。")
                 return
             yield event.plain_result(f"开始处理审批 [{aid}]：{record['description']}")
             result_msg = await self._dispatch_approved_action(record["action"], record["params"])
-            await remove_approval(self, aid)
             yield event.plain_result(f"审批 [{aid}] 已处理完成。\n{result_msg}")
             return
 
@@ -77,11 +75,10 @@ class AdminToolsMixin:
             if not aid:
                 yield event.plain_result("请提供审批 ID（approval_id）。")
                 return
-            record = await get_approval(self, aid)
+            record = await claim_approval(self, aid)
             if not record:
                 yield event.plain_result(f"未找到编号 [{aid}] 的审批请求，可能已处理或已过期。")
                 return
-            await remove_approval(self, aid)
             msg = f"审批 [{aid}] 已拒绝：{record['description']}"
             if reason:
                 msg += f"\n拒绝原因：{reason}"

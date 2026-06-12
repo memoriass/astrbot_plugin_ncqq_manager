@@ -1,9 +1,9 @@
-import logging
 from urllib.parse import quote
 
-from .api import NCQQClient
+from astrbot.api import logger
 
-logger = logging.getLogger(__name__)
+from .client import NCQQClient
+from .sanitization import sanitize_text
 
 
 def _action_label(action: str) -> str:
@@ -21,18 +21,7 @@ def _action_label(action: str) -> str:
 
 
 def _sanitize_text(text: str) -> str:
-    masked = text.strip()
-    lower = masked.lower()
-    for key in ["token", "api_key", "apikey", "password", "cookie", "secret"]:
-        marker = f"{key}="
-        start = lower.find(marker)
-        if start == -1:
-            continue
-        end = masked.find("&", start)
-        if end == -1:
-            end = len(masked)
-        masked = masked[: start + len(marker)] + "***" + masked[end:]
-        lower = masked.lower()
+    masked = sanitize_text(text.strip())
     if len(masked) > 180:
         masked = quote(masked[:177], safe="/:=@?&._- ") + "..."
     return masked

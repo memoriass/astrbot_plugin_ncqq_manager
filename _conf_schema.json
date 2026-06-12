@@ -11,7 +11,7 @@
     },
     "qrcode_private": {
         "title": "二维码私聊发送",
-        "type": "boolean",
+        "type": "bool",
         "description": "群聊触发二维码时，通过私聊发送给请求者（防止他人误扫）。默认开启。",
         "default": true
     },
@@ -21,15 +21,27 @@
         "description": "管理通知推送的目标群号（掉线告警、恢复通知等）。留空则不推送群通知。",
         "default": ""
     },
+    "enable_group_whitelist": {
+        "title": "启用响应群白名单",
+        "type": "bool",
+        "description": "开启后，插件只响应 response_groups 中列出的群聊；私聊不受影响。",
+        "default": false
+    },
+    "response_groups": {
+        "title": "响应群白名单",
+        "type": "string",
+        "description": "允许插件响应的群号，支持逗号、空格、顿号分隔。仅在启用响应群白名单后生效。",
+        "default": ""
+    },
     "enable_offline_notify": {
         "title": "掉线通知",
-        "type": "boolean",
+        "type": "bool",
         "description": "开启后定时检测实例状态，掉线时私聊通知归属人并推送到通知群。",
         "default": true
     },
     "health_check_interval": {
         "title": "检测间隔（分钟）",
-        "type": "number",
+        "type": "int",
         "description": "实例健康检测的轮询间隔，单位分钟。建议 3~10 分钟。",
         "default": 5
     }

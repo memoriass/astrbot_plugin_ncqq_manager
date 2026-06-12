@@ -2,9 +2,9 @@ import re
 
 from astrbot.api.all import AstrMessageEvent
 
-from .actions import do_inject_by_alias
-from .approval import create_approval
-from .monitoring import do_get_radar_endpoints
+from ..core.actions import do_inject_by_alias
+from ..core.approval import create_approval
+from ..core.monitoring import do_get_radar_endpoints
 
 
 class BackendToolsMixin:
@@ -22,7 +22,7 @@ class BackendToolsMixin:
         exposed in chat workflows.
         """
         sender_id = str(event.get_sender_id())
-        is_admin = event.is_admin()
+        is_admin = self.is_plugin_admin(event)
 
         if action != "inject":
             yield event.plain_result("不支持的后端操作。connect_backend workflow 仅允许 inject。")
@@ -44,6 +44,13 @@ class BackendToolsMixin:
             return
 
         if not is_admin:
+            allowed = await self.get_allowed_instances(sender_id)
+            bad = [name for name in targets if name not in allowed]
+            if bad:
+                yield event.plain_result(
+                    f"以下实例不在你的可操作范围内：{'、'.join(bad)}。"
+                )
+                return
             ids = []
             for name in targets:
                 aid = await create_approval(
@@ -55,7 +62,7 @@ class BackendToolsMixin:
                     description=f"接入后端 {resolved_alias} -> 实例 {name}（申请者: {sender_id}）",
                 )
                 ids.append(aid)
-            yield event.plain_result(self._approval_notice_batch("接入后端", list(zip(targets, ids))))
+            yield self._approval_notice_batch(event, "接入后端", list(zip(targets, ids)))
             return
 
         results: list[str] = []

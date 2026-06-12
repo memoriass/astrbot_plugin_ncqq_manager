@@ -1,9 +1,7 @@
 import json
-import logging
 
 import aiohttp
-
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 
 class NCQQClient:
@@ -89,9 +87,6 @@ class NCQQClient:
                     "SSE %s → %s: %s", url, resp.status, text_content
                 )
                 raise Exception(f"SSE 请求失败（HTTP {resp.status}）。")
-
-            async with aiohttp.ClientTimeout(total=timeout):
-                pass
 
             buffer: list[str] = []
             loop = aiohttp.helpers.get_running_loop()

@@ -86,6 +86,7 @@ async def create_approval(
 async def get_approval(plugin: "NCQQManagerPlugin", approval_id: str) -> dict | None:
     """Return the approval record or None if not found / expired."""
     approvals = await plugin.get_pending_approvals()
+    approval_id = str(approval_id or "").upper()
     record = approvals.get(approval_id)
     if record is None:
         return None
@@ -94,11 +95,30 @@ async def get_approval(plugin: "NCQQManagerPlugin", approval_id: str) -> dict | 
     return record
 
 
+async def claim_approval(plugin: "NCQQManagerPlugin", approval_id: str) -> dict | None:
+    """Atomically remove and return one non-expired approval record."""
+    approval_id = str(approval_id or "").upper()
+    if not approval_id:
+        return None
+    async with _approval_lock:
+        approvals = await plugin.get_pending_approvals()
+        record = approvals.get(approval_id)
+        if record is None:
+            return None
+        if time.time() - record.get("created_at", 0) > APPROVAL_TTL:
+            approvals.pop(approval_id, None)
+            await plugin.save_pending_approvals(approvals)
+            return None
+        approvals.pop(approval_id, None)
+        await plugin.save_pending_approvals(approvals)
+        return record
+
+
 async def remove_approval(plugin: "NCQQManagerPlugin", approval_id: str) -> None:
     """Delete a pending approval record."""
     async with _approval_lock:
         approvals = await plugin.get_pending_approvals()
-        approvals.pop(approval_id, None)
+        approvals.pop(str(approval_id or "").upper(), None)
         await plugin.save_pending_approvals(approvals)
 
 

@@ -1,28 +1,38 @@
-import logging
 import pathlib
 import re
 
+from astrbot.api import logger
 from astrbot.api.all import *
 from astrbot.api.event import filter, AstrMessageEvent
-from astrbot.core.message.components import At, Reply
+from astrbot.core.message.components import At, Plain, Reply
 from astrbot.core.star.star_tools import StarTools
 from astrbot.core.star.filter.command import GreedyStr
 
-from .scripts.api import NCQQClient
-from .scripts.health_check import do_health_check
-from .scripts.html_renderer import cleanup_renderer, set_bg_dir
-from .scripts.tools_admin import AdminToolsMixin
-from .scripts.tools_backend import BackendToolsMixin
-from .scripts.tools_instance import InstanceToolsMixin
-from .scripts.workflows import run_ncqq_workflow, workflow_from_cli, workflow_from_tool
-
-logger = logging.getLogger(__name__)
+from .core.approval import claim_approval
+from .core.client import NCQQClient
+from .core.health_check import do_health_check
+from .rendering.html_renderer import cleanup_renderer, set_bg_dir
+from .tools.admin import AdminToolsMixin
+from .tools.approval_shortcuts import ApprovalShortcutMixin
+from .tools.backend import BackendToolsMixin
+from .tools.instance import InstanceToolsMixin
+from .workflows import run_ncqq_workflow, workflow_from_cli, workflow_from_tool
 
 
 @register(
-    "ncqq_manager", "AstrBot", "NapCatQQ 容器控制与后端路由插件", "2.0.1", "repo_url"
+    "ncqq_manager",
+    "memoriass",
+    "NapCatQQ 容器控制与后端路由插件",
+    "2.0.3",
+    "https://github.com/memoriass/astrbot_plugin_ncqq_manager",
 )
-class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsMixin):
+class NCQQManagerPlugin(
+    Star,
+    InstanceToolsMixin,
+    BackendToolsMixin,
+    AdminToolsMixin,
+    ApprovalShortcutMixin,
+):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
         self.config = config
@@ -91,7 +101,7 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsM
         event: AstrMessageEvent,
         workflow: str,
         target: str = "",
-        params: str = "",
+        params: object = "",
     ):
         """Run a compiled internal ncqq workflow.
 
@@ -100,38 +110,36 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsM
         performs permission checks, target resolution, backend alias validation,
         approval routing, and API calls internally.
 
-        Supported workflow scenarios:
-            create_instance - create or resume an instance flow; branches on
-                existence, permission, binding, backend injection, startup, and QR.
-            relogin_instance - check login state; fetch QR code only when needed.
-            control_instance - start/stop/restart/pause/unpause/kill with checks.
-            connect_backend - validate endpoint alias and inject it into one instance.
-            check_instance - admin-only existence/login/resource/log diagnosis.
-            list_instances - show instance state and binding overview.
-            check_backends - list configured backend endpoints.
-            check_manager - admin-only ncqq-manager dependency health check.
-            check_botshepherd - admin-only BotShepherd status check.
-            check_bot_runtime - admin-only known Bot WS runtime status.
-            read_bot_messages - admin-only recent messages for one Bot.
-            audit_operations - admin-only recent operation audit summary.
-            inspect_resources - admin-only image and node asset overview.
-            read_instance_config - admin-only file tree and optional config preview.
-            delete_instance - explicit-confirm delete flow.
-            review_approvals - admin-only pending approval view.
+        Primary workflow scenarios:
+            manage_instance - instance main flow. Use params.intent=create,
+                recover, control, connect, check, list, or delete. It routes to
+                the specific instance workflow internally.
+            query - read-only main flow. Use params.scope=instances, backends,
+                health, instance, messages, audit, resources, or config.
+            manage_backend - backend main flow. Use params.intent=list/check or
+                connect.
+            review_approvals - admin-only pending approval list/approve/reject.
+
+        Specific workflows such as create_instance, relogin_instance,
+        control_instance, connect_backend, check_health, and read_instance_config
+        remain directly callable when the model already knows the exact flow.
 
         Args:
-            workflow: One workflow scenario id from the list above.
-            target: Target instance name when the scenario works on one instance.
+            workflow(string): One workflow scenario id from the list above.
+            target(string): Target instance name when the scenario works on one instance.
                 When omitted and the user has exactly one bound instance, the
                 plugin resolves it automatically.
-            params: Optional JSON object. Common fields:
-                create_instance: {"backend_alias":"alias","bind_qq":"123","qrcode":true}
-                control_instance: {"action":"restart","check_after":true}
-                connect_backend: {"backend_alias":"alias"}
-                read_bot_messages: {"limit":20}
-                read_instance_config: {"file_name":"onebot11_uin.json","path":"config"}
+            params(object): Optional JSON object. Common fields:
+                manage_instance: {"intent":"control","action":"restart"}
+                query: {"scope":"health","details":true}
+                manage_backend: {"intent":"connect","backend_alias":"alias"}
+                    The backend alias may also arrive as "backend" from LLMs.
                 delete_instance: {"confirm":true,"delete_data":false}
+                review_approvals: {"action":"approve","approval_id":"ABC123"}
         """
+        event = self._resolve_message_event(event)
+        if not self.is_response_group_allowed(event):
+            return
         request = workflow_from_tool(workflow, target, params)
         async for r in run_ncqq_workflow(self, event, request):
             yield r
@@ -142,6 +150,9 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsM
 
     _NCQQ_HELP = (
         "ncqq workflow 调试入口：\n"
+        "ncqq manage_instance <intent> [args]   - 实例主流程：create/recover/control/connect/check/list/delete\n"
+        "ncqq query [scope] [target]            - 查询主流程：instances/backends/health/instance/messages/audit/resources/config\n"
+        "ncqq manage_backend [list|connect] ... - 后端主流程\n"
         "ncqq create_instance <实例> [端点别名] - 创建流程\n"
         "ncqq relogin_instance [实例]           - 掉线重登流程\n"
         "ncqq control_instance <动作> [实例]    - 控制流程：start/stop/restart/pause/unpause/kill\n"
@@ -149,19 +160,36 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsM
         "ncqq check_instance [实例]             - 实例检测流程，管理员限定\n"
         "ncqq list_instances                    - 实例列表流程\n"
         "ncqq check_backends                     - 后端端点检测流程\n"
-        "ncqq check_manager                      - 管理器健康检测流程，管理员限定\n"
-        "ncqq check_botshepherd                  - BotShepherd 检测流程，管理员限定\n"
-        "ncqq check_bot_runtime                  - Bot 运行态检测流程，管理员限定\n"
+        "ncqq check_health [detail]              - 综合健康检查流程，管理员限定\n"
         "ncqq read_bot_messages <实例> [条数]   - Bot 消息读取流程，管理员限定\n"
         "ncqq audit_operations [条数]            - 操作审计流程，管理员限定\n"
         "ncqq inspect_resources                  - 资源检测流程，管理员限定\n"
         "ncqq read_instance_config <实例> [文件] [路径] - 配置读取流程，管理员限定\n"
         "ncqq delete_instance <实例> confirm [data] - 销毁流程；data 表示同时删数据\n"
-        "ncqq review_approvals                   - 审批队列流程"
+        "ncqq review_approvals [approve|reject <ID>] - 审批队列流程"
     )
+
+    def _is_explicit_ncqq_command(self, event: AstrMessageEvent) -> bool:
+        prefixes = self.context.get_config().get("wake_prefix", ["/"])
+        prefixes = [str(prefix) for prefix in prefixes if str(prefix)]
+        for comp in event.get_messages():
+            if not isinstance(comp, Plain):
+                continue
+            text = str(comp.text or "").strip()
+            if any(
+                text == f"{prefix}ncqq" or text.startswith(f"{prefix}ncqq ")
+                for prefix in prefixes
+            ):
+                return True
+        return False
 
     @filter.command("ncqq")
     async def cmd_ncqq(self, event: AstrMessageEvent, sub: str = "help", args: GreedyStr = ""):
+        if not self.is_response_group_allowed(event):
+            return
+        if not self._is_explicit_ncqq_command(event):
+            return
+
         if sub in ("help", "h", ""):
             yield event.plain_result(self._NCQQ_HELP)
             return
@@ -192,6 +220,33 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsM
         """Return AstrBot global admin QQ list from config admins_id."""
         return [str(a) for a in self.context.get_config().get("admins_id", [])]
 
+    def _resolve_message_event(self, event: AstrMessageEvent) -> AstrMessageEvent:
+        if hasattr(event, "get_sender_id"):
+            return event
+        wrapped_context = getattr(event, "context", None)
+        wrapped_event = getattr(wrapped_context, "event", None)
+        if wrapped_event is not None and hasattr(wrapped_event, "get_sender_id"):
+            return wrapped_event
+        raise TypeError("ncqq_manager requires an AstrMessageEvent context")
+
+    def is_plugin_admin(self, event: AstrMessageEvent) -> bool:
+        """Treat AstrBot role admins and configured admins_id as plugin admins."""
+        sender_id = str(event.get_sender_id())
+        return event.is_admin() or sender_id in self.get_astrbot_admins()
+
+    def response_group_ids(self) -> set[str]:
+        raw = str(self.config.get("response_groups", "") or "")
+        return {part for part in re.split(r"[,，、\s]+", raw) if part}
+
+    def is_response_group_allowed(self, event: AstrMessageEvent) -> bool:
+        """Return whether this event may trigger plugin responses."""
+        if not self.config.get("enable_group_whitelist", False):
+            return True
+        group_id = str(event.get_group_id() or "").strip()
+        if not group_id:
+            return True
+        return group_id in self.response_group_ids()
+
     async def get_allowed_instances(self, sender_id: str) -> list:
         """Return instances for sender_id.
 
@@ -219,99 +274,93 @@ class NCQQManagerPlugin(Star, InstanceToolsMixin, BackendToolsMixin, AdminToolsM
         return mapping.get(str(user_id), {}).get("instances", [])
 
     # ------------------------------------------------------------------
-    # Approval notice helpers (消除重复的审批通知模板)
-    # ------------------------------------------------------------------
-
-    def _approval_notice_single(self, action_label: str, approval_id: str) -> str:
-        """生成单条审批通知文本。"""
-        admins = self.get_astrbot_admins()
-        at_parts = "".join(f"@{a} " for a in admins) if admins else "@管理员 "
-        return (
-            f"⚠️ {action_label}属于高权限操作，已提交审批。\n"
-            f"审批 ID：{approval_id}\n"
-            f"请 {at_parts}回复确认（引用本条消息或说'plana 批准 {approval_id}'）。"
-        )
-
-    def _approval_notice_batch(
-        self, action_label: str, name_id_pairs: list[tuple[str, str]]
-    ) -> str:
-        """生成批量审批通知文本。name_id_pairs: [(instance_name, approval_id), ...]"""
-        admins = self.get_astrbot_admins()
-        at_parts = "".join(f"@{a} " for a in admins) if admins else "@管理员 "
-        id_lines = "\n".join(f"  {n} → {aid}" for n, aid in name_id_pairs)
-        return (
-            f"⚠️ {action_label}属于高权限操作，已提交 {len(name_id_pairs)} 条审批。\n"
-            f"{id_lines}\n"
-            f"请 {at_parts}逐条批准。"
-        )
-
-    # ------------------------------------------------------------------
-    # Pending approvals KV helpers
-    # ------------------------------------------------------------------
-
-    async def get_pending_approvals(self) -> dict:
-        return await self.get_kv_data("pending_approvals", {})
-
-    async def save_pending_approvals(self, approvals: dict) -> None:
-        await self.put_kv_data("pending_approvals", approvals)
-
-    # ------------------------------------------------------------------
     # Reply-based approval shortcut listener
     # ------------------------------------------------------------------
 
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     async def on_group_message_reply(self, event: AstrMessageEvent):
-        """Detect AstrBot admin quoting an approval notice and auto-approve it."""
+        """Handle group approval shortcuts from admins.
+
+        Supported forms:
+        - 直接回复：批准 ABC123 / 拒绝 ABC123
+        - 引用审批消息：批准 / 拒绝
+        - 引用批量审批消息：批准 ABC123 / 拒绝 ABC123，或明确“批准全部”
+        """
+        if not self.is_response_group_allowed(event):
+            return
+
         # event.role may not be set for non-wake messages (waking_check is skipped),
         # so compare directly against admins_id config instead of event.is_admin().
-        if str(event.get_sender_id()) not in self.get_astrbot_admins():
+        if not self.is_plugin_admin(event):
             return
 
         reply_comp = next(
             (c for c in event.get_messages() if isinstance(c, Reply)), None
         )
-        if reply_comp is None:
+
+        text = (event.get_message_str() or "").strip()
+        decision = self._approval_decision(text)
+        if not decision:
             return
 
-        text = event.message_str.strip().upper()
-        matches = re.findall(r"\b([A-Z][A-Z0-9]{5})\b", text)
-
-        # 检查是否是拒绝操作
-        is_reject = bool(re.search(r"拒绝|不|驳回|取消|REJECT|NO|CANCEL", text))
-
-        # 允许管理员仅回复“同意/批准”等词，自动从引用的消息体中提取审批 ID
-        if not matches and (is_reject or re.search(r"同意|批准|通过|确认|APPROVE|YES|OK|PLANA", text)):
-            quoted_text = getattr(reply_comp, "message_str", "") or getattr(reply_comp, "text", "")
-            if quoted_text:
-                matches = re.findall(r"审批\s*ID[：:]?\s*([A-Z0-9]{6})\b", quoted_text.upper())
-                if not matches and "审批" in quoted_text:
-                    matches = re.findall(r"\b([A-Z][A-Z0-9]{5})\b", quoted_text.upper())
+        text_ids = self._approval_ids_from_text(text)
+        quote_ids = self._approval_ids_from_reply(reply_comp) if reply_comp else []
+        if (
+            quote_ids
+            and not text_ids
+            and (
+                reply_comp is None
+                or not self._approval_reply_may_target_bot(event, reply_comp)
+            )
+        ):
+            return
+        matches = text_ids or quote_ids
 
         if not matches:
+            if (
+                reply_comp is None
+                or not self._approval_reply_may_target_bot(event, reply_comp)
+                or not await self._has_group_approvals(event)
+            ):
+                return
+            event.stop_event()
+            yield event.plain_result("未能定位审批 ID。请回复“批准 <审批ID>”或引用审批消息后回复“批准/拒绝”。")
             return
 
-        from .scripts.approval import get_approval, remove_approval
+        allow_quote_batch = bool(re.search(r"全部|所有|ALL", text, re.IGNORECASE))
+        if len(matches) > 1 and not text_ids and not allow_quote_batch:
+            event.stop_event()
+            yield event.plain_result(
+                "引用的审批消息包含多个审批 ID。请带具体 ID 回复，或明确发送“批准全部/拒绝全部”。"
+            )
+            return
 
+        handled: list[str] = []
+        missing: list[str] = []
         for candidate in matches:
-            record = await get_approval(self, candidate)
+            record = await claim_approval(self, candidate)
             if record is None:
+                missing.append(candidate)
                 continue
 
-            if is_reject:
-                await remove_approval(self, candidate)
-                event.stop_event()
-                yield event.plain_result(
-                    f"❌ 已通过引用回复驳回审批 [{candidate}]：{record['description']}"
-                )
-                return
+            if decision == "reject":
+                handled.append(f"已驳回 [{candidate}]：{record['description']}")
+                continue
 
             action = record["action"]
             params = record["params"]
             result_msg = await self._dispatch_approved_action(action, params)
-            await remove_approval(self, candidate)
-            event.stop_event()
-            yield event.plain_result(
-                f"✅ 已通过引用回复批准审批 [{candidate}]：{record['description']}\n"
-                f"执行结果：{result_msg}"
+            handled.append(
+                f"已批准 [{candidate}]：{record['description']}\n执行结果：{result_msg}"
             )
+
+        event.stop_event()
+        if handled:
+            prefix = "❌" if decision == "reject" else "✅"
+            lines = [f"{prefix} 审批处理完成：", *handled]
+            if missing:
+                lines.append("未找到或已过期：" + "、".join(missing))
+            yield event.plain_result("\n\n".join(lines))
             return
+
+        yield event.plain_result("未找到有效审批记录，可能已处理或已过期。")

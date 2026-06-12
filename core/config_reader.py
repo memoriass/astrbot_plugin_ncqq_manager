@@ -1,9 +1,9 @@
-import logging
 from urllib.parse import quote
 
-from .api import NCQQClient
+from astrbot.api import logger
 
-logger = logging.getLogger(__name__)
+from .client import NCQQClient
+from .sanitization import sanitize_text
 
 
 async def do_read_config(client: NCQQClient, instance_name: str, file_name: str) -> str:
@@ -22,7 +22,11 @@ async def do_read_config(client: NCQQClient, instance_name: str, file_name: str)
         if res.get("status") == "not_found":
             return f"[{instance_name}] 中未找到文件 {file_name}，请确认路径是否正确。"
         content = res.get("content", "")
-        lines = [line.rstrip() for line in str(content).splitlines() if line.strip()]
+        lines = [
+            sanitize_text(line.rstrip())
+            for line in str(content).splitlines()
+            if line.strip()
+        ]
         preview = lines[:12]
         if not preview:
             return f"[{instance_name}] 中的 {file_name} 当前为空。"

@@ -1,23 +1,23 @@
 import base64
-import logging
 import re
 
+from astrbot.api import logger
 from astrbot.api.all import AstrMessageEvent, Image
 from astrbot.api.star import StarTools
 from astrbot.core.message.message_event_result import MessageChain
 
-from .actions import do_create_instance, do_instance_action
-from .approval import create_approval
-from .config_manager import do_read_config
-from .html_renderer import render_bindings, render_instances
-from .interaction import do_check_login_status, do_get_qrcode
-from .monitoring import (
+from ..core.actions import do_create_instance, do_instance_action
+from ..core.approval import create_approval
+from ..core.config_reader import do_read_config
+from ..core.interaction import do_check_login_status, do_get_qrcode
+from ..core.monitoring import (
     do_confirm_instance_action,
     do_get_monitor,
     do_list_assets,
     do_list_files,
     do_list_instances,
 )
+from ..rendering.html_renderer import render_bindings, render_instances
 
 
 class InstanceToolsMixin:
@@ -59,7 +59,7 @@ class InstanceToolsMixin:
             path (string): 仅 query=files 时有效，相对于实例数据根目录的路径，留空表示根目录。
         """
         sender_id = str(event.get_sender_id())
-        is_admin = event.is_admin()
+        is_admin = self.is_plugin_admin(event)
 
         # --- instances ---
         if query == "instances":
@@ -187,7 +187,7 @@ class InstanceToolsMixin:
             delete_data (boolean): 仅 action=delete 时有效。true 时同时删除本地数据目录（QQ数据/配置/插件/缓存，不可恢复）；false 时仅移除容器保留数据。用户说"彻底删除""删干净"时为 true，仅说"删除"时为 false。
         """
         sender_id = str(event.get_sender_id())
-        is_admin = event.is_admin()
+        is_admin = self.is_plugin_admin(event)
 
         names = [n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()]
 
@@ -236,7 +236,7 @@ class InstanceToolsMixin:
                         description=f"销毁实例 {n}{'（含本地数据）' if delete_data else ''}（申请者: {sender_id}）",
                     )
                     ids.append(aid)
-                yield event.plain_result(self._approval_notice_batch("销毁实例", list(zip(names, ids))))
+                yield self._approval_notice_batch(event, "销毁实例", list(zip(names, ids)))
                 return
             # Admin delete
             results = []
@@ -292,7 +292,7 @@ class InstanceToolsMixin:
             instance_name (string): 目标 ncqq 实例名，必须明确提供。
         """
         sender_id = str(event.get_sender_id())
-        is_admin = event.is_admin()
+        is_admin = self.is_plugin_admin(event)
         name = instance_name.strip()
 
         if not name:
@@ -335,9 +335,7 @@ class InstanceToolsMixin:
                         message_chain=chain,
                     )
                 except Exception as e:
-                    logging.getLogger(__name__).warning(
-                        "私聊发送二维码失败 (QQ %s): %s", sender_id, e
-                    )
+                    logger.warning("私聊发送二维码失败 (QQ %s): %s", sender_id, e)
                     yield event.plain_result("⚠️ 私聊发送失败，可能未添加好友。以下直接展示：")
                     yield event.chain_result([item])
             else:

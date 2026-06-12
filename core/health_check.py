@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import base64
 import datetime
-import logging
+import html
 import pathlib
 from typing import TYPE_CHECKING
 
+from astrbot.api import logger
 from astrbot.api.all import Image
 from astrbot.core.message.message_event_result import MessageChain
 from astrbot.core.star.star_tools import StarTools
@@ -15,8 +16,6 @@ from .monitoring import do_list_instances
 
 if TYPE_CHECKING:
     from ..main import NCQQManagerPlugin
-
-logger = logging.getLogger(__name__)
 
 # Alert HTML template
 _ALERT_TEMPLATE_PATH = pathlib.Path(__file__).parent.parent / "templates" / "alert.html"
@@ -42,13 +41,16 @@ def _get_alert_template() -> str:
 
 
 def _build_alert_item(name: str, dot_class: str, detail: str, owner: str = "") -> str:
-    owner_html = f'<span class="owner-tag">{owner}</span>' if owner else ""
+    safe_name = html.escape(str(name or ""))
+    safe_detail = html.escape(str(detail or ""))
+    safe_owner = html.escape(str(owner or ""))
+    owner_html = f'<span class="owner-tag">{safe_owner}</span>' if owner else ""
     return (
         f'<div class="alert-item">'
         f'<span class="dot {dot_class}"></span>'
         f'<div class="inst-info">'
-        f'<div class="inst-name">{name}</div>'
-        f'<div class="inst-detail">{detail}</div>'
+        f'<div class="inst-name">{safe_name}</div>'
+        f'<div class="inst-detail">{safe_detail}</div>'
         f'</div>'
         f'{owner_html}'
         f'</div>'
@@ -81,7 +83,7 @@ async def render_alert_card(
     )
 
     try:
-        from .html_renderer import _screenshot_html
+        from ..rendering.html_renderer import _screenshot_html
         return await _screenshot_html(html, _BODY_WIDTH)
     except Exception as e:
         logger.warning("Alert card render failed: %s", e)
