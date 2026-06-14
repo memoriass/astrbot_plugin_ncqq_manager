@@ -7,10 +7,12 @@
     managers: document.getElementById("managers"),
     refresh: document.getElementById("refresh"),
     toast: document.getElementById("toast"),
+    tabs: document.getElementById("view-tabs"),
   };
 
   let bridge = null;
   let currentData = null;
+  let activeView = "instances";
   const pageSize = { instances: 9, bindings: 8 };
   const pages = { instances: {}, bindings: 1 };
 
@@ -255,6 +257,16 @@
     els.refresh.classList.toggle("spin", loading);
   }
 
+  function setActiveView(view) {
+    activeView = view || "instances";
+    document.querySelectorAll("[data-view]").forEach((item) => {
+      item.classList.toggle("active", item.dataset.view === activeView);
+    });
+    document.querySelectorAll("[data-view-panel]").forEach((item) => {
+      item.classList.toggle("active", item.dataset.viewPanel === activeView);
+    });
+  }
+
   function render(data) {
     renderKpis(data);
     renderManagers(data.managers || []);
@@ -350,7 +362,7 @@
       els.approvals.innerHTML = empty("暂无审批");
       return;
     }
-    els.approvals.innerHTML = approvals
+    els.approvals.innerHTML = `<div class="approval-grid">${approvals
       .map(
         (item) => `
         <article class="approval">
@@ -366,7 +378,7 @@
         </article>
       `,
       )
-      .join("");
+      .join("")}</div>`;
   }
 
   function renderBindings(bindings) {
@@ -377,7 +389,7 @@
     const page = clampPage(pages.bindings, bindings.length, pageSize.bindings);
     const items = pageSlice(bindings, page, pageSize.bindings);
     pages.bindings = page;
-    els.bindings.innerHTML = items
+    els.bindings.innerHTML = `<div class="binding-grid">${items
       .map(
         (item) => `
         <div class="binding">
@@ -387,7 +399,7 @@
         </div>
       `,
       )
-      .join("") + renderPager("bindings", "bindings", page, bindings.length, pageSize.bindings);
+      .join("")}</div>${renderPager("bindings", "bindings", page, bindings.length, pageSize.bindings)}`;
   }
 
   function empty(text, error) {
@@ -433,6 +445,11 @@
   }
 
   els.refresh.addEventListener("click", loadData);
+  els.tabs.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-view]");
+    if (!button) return;
+    setActiveView(button.dataset.view);
+  });
   els.managers.addEventListener("click", (event) => {
     if (handlePageButton(event)) return;
     const button = event.target.closest("button[data-refresh]");
@@ -446,5 +463,6 @@
     handleApproval(button.dataset.action, button.dataset.id);
   });
 
+  setActiveView(activeView);
   initBridge().then(loadData).catch((error) => showToast(error.message || String(error), true));
 })();

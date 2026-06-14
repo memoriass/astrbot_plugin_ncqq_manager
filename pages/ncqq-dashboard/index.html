@@ -21,29 +21,33 @@
 
       <section id="kpis" class="kpi-grid" aria-label="概览"></section>
 
-      <main class="content-grid">
-        <section class="panel-wide">
+      <nav id="view-tabs" class="view-tabs" aria-label="页面切换">
+        <button class="tab-button active" type="button" data-view="instances">实例</button>
+        <button class="tab-button" type="button" data-view="bindings">绑定</button>
+        <button class="tab-button" type="button" data-view="approvals">审批</button>
+      </nav>
+
+      <main class="view-shell">
+        <section id="view-instances" class="view-panel active" data-view-panel="instances">
           <div class="section-head">
             <h2>实例</h2>
           </div>
           <div id="managers" class="manager-grid"></div>
         </section>
 
-        <aside class="side-column">
-          <section class="side-panel">
-            <div class="section-head">
-              <h2>审批</h2>
-            </div>
-            <div id="approvals" class="stack"></div>
-          </section>
+        <section id="view-bindings" class="view-panel" data-view-panel="bindings">
+          <div class="section-head">
+            <h2>绑定</h2>
+          </div>
+          <div id="bindings"></div>
+        </section>
 
-          <section class="side-panel">
-            <div class="section-head">
-              <h2>绑定</h2>
-            </div>
-            <div id="bindings" class="stack compact"></div>
-          </section>
-        </aside>
+        <section id="view-approvals" class="view-panel" data-view-panel="approvals">
+          <div class="section-head">
+            <h2>审批</h2>
+          </div>
+          <div id="approvals"></div>
+        </section>
       </main>
     </div>
 

@@ -127,7 +127,6 @@ p {
 }
 
 .kpi,
-.side-panel,
 .approval,
 .binding {
   border: 1px solid var(--line);
@@ -149,36 +148,11 @@ p {
   font-size: 25px;
 }
 
-.content-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 20px;
-  align-items: start;
-}
-
-.panel-wide {
-  min-width: 0;
-}
-
-.side-column {
-  display: grid;
-  gap: 16px;
-}
-
-.side-panel {
-  padding: 16px;
-}
-
 .section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
-}
-
-.stack {
-  display: grid;
-  gap: 12px;
 }
 
 .approval {
@@ -260,31 +234,19 @@ p {
   color: white;
 }
 
-@media (max-width: 1100px) {
-  .content-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .side-column {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
 @media (max-width: 760px) {
   .shell {
     padding: 14px;
   }
 
-  .kpi-grid,
-  .side-column {
+  .kpi-grid {
     grid-template-columns: 1fr 1fr;
   }
 
 }
 
 @media (max-width: 520px) {
-  .kpi-grid,
-  .side-column {
+  .kpi-grid {
     grid-template-columns: 1fr;
   }
 
