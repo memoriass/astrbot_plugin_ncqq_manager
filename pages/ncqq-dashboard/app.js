@@ -131,17 +131,6 @@
     return `${text.slice(0, 3)}****${text.slice(-3)}`;
   }
 
-  function loginLabel(item) {
-    const stageMap = {
-      logged_in: "登录成功",
-      qr_waiting: "待扫码",
-      offline: "离线",
-      initializing: "初始化",
-    };
-    if (item.bot_online) return "登录成功";
-    return stageMap[item.login_stage] || (item.running ? "未登录" : "离线");
-  }
-
   function instanceState(item) {
     if (item.bot_online) return { key: "online", text: "在线" };
     if (item.running) return { key: "warn", text: "心跳丢失" };
@@ -229,31 +218,28 @@
             <span>后端 ${escapeHtml(manager.backends?.total || 0)}</span>
           </div>
         </div>
-        ${instances.ok ? `<div class="instance-grid">${items.map((item) => renderInstanceCard(item, manager)).join("")}</div>` : empty(instances.error || "实例读取失败", true)}
+        ${instances.ok ? `<div class="instance-grid">${items.map(renderInstanceCard).join("")}</div>` : empty(instances.error || "实例读取失败", true)}
       </section>
     `;
   }
 
-  function renderInstanceCard(item, manager) {
+  function renderInstanceCard(item) {
     const state = instanceState(item);
     const avatar = String(item.avatar || "").trim();
-    const bgStyle = avatar ? ` style="background-image:url('${escapeHtml(avatar)}')"` : "";
+    const name = item.display_name || item.name;
+    const bgStyle = avatar ? ` style="--instance-bg:url('${escapeHtml(avatar)}')"` : "";
     return `
-      <article class="instance-card ${state.key}">
-        <div class="avatar-pane${avatar ? "" : " empty-avatar"}"${bgStyle}>
-          ${avatar ? `<img src="${escapeHtml(avatar)}" alt="" loading="lazy" onerror="this.remove()" />` : "<span>OFF</span>"}
-        </div>
-        <div class="instance-main">
-          <div class="instance-head">
-            <h3>${escapeHtml(item.display_name || item.name)}</h3>
-            <span class="status-chip ${state.key}">${escapeHtml(state.text)}</span>
+      <article class="instance-card ${state.key}"${bgStyle}>
+        <div class="instance-card-body">
+          <h3>${escapeHtml(name)}</h3>
+          <div class="instance-avatar${avatar ? "" : " empty-avatar"}">
+            ${avatar ? `<img src="${escapeHtml(avatar)}" alt="" loading="lazy" onerror="this.remove()" />` : "<span>OFF</span>"}
           </div>
           <p>QQ: ${escapeHtml(maskQQ(item.uin))}</p>
-          <div class="instance-facts">
-            <span>${escapeHtml(loginLabel(item))}</span>
-            <span>${escapeHtml(item.status || "-")}</span>
-            <span>${escapeHtml(manager.id)}/${escapeHtml(item.name)}</span>
-          </div>
+        </div>
+        <div class="instance-foot">
+          <span class="instance-state ${state.key}">${escapeHtml(state.text)}</span>
+          <button class="instance-refresh" type="button" data-refresh title="刷新" aria-label="刷新实例数据">&#8635;</button>
         </div>
       </article>
     `;
@@ -335,6 +321,11 @@
   }
 
   els.refresh.addEventListener("click", loadData);
+  els.managers.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-refresh]");
+    if (!button) return;
+    loadData();
+  });
   els.approvals.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-action]");
     if (!button) return;
