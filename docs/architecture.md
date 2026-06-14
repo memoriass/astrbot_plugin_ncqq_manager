@@ -1,6 +1,6 @@
 # ncqq_manager 架构说明
 
-本文面向后续模型和维护者，说明重构后的正式插件结构。代码中只保留必要短注释，模块职责以本文和 `docs/` 下按功能命名的架构文档为准。
+本文面向后续模型和维护者，说明正式插件结构。代码中只保留必要短注释，模块职责以本文和 `docs/` 下按功能命名的架构文档为准。
 
 ## 根目录
 
@@ -27,7 +27,7 @@
 
 ## 多 Manager 模型
 
-插件从 2.1.0 开始支持多个 ncqq-manager 面板。旧的 `manager_url` / `api_key` 仍作为单面板配置使用；新增 `manager_profiles` JSON 文本后，每个面板以稳定 `manager_id` 管理独立 HTTP session。
+插件支持多个 ncqq-manager 面板。旧的 `manager_url` / `api_key` 仍作为单面板配置使用；配置 `manager_profiles` JSON 文本后，每个面板以稳定 `manager_id` 管理独立 HTTP session。
 
 命名规则：
 
@@ -40,7 +40,7 @@
 
 ## Workflow 层
 
-聊天侧只暴露 workflow，不直接暴露底层 API 包装。当前优先使用主 workflow：`manage_instance`、`query`、`manage_backend`、`review_approvals`；细分 workflow 仍可直接调用，并作为主流程内部路由目标。
+聊天侧只暴露 workflow，不直接暴露底层 API 包装。优先使用主 workflow：`manage_instance`、`query`、`manage_backend`、`review_approvals`；细分 workflow 仍可直接调用，并作为主流程内部路由目标。
 
 对外入口从 `workflows` 导入：
 
@@ -64,7 +64,8 @@
 2. 在 `workflows/parsing.py` 添加 CLI 参数解析规则。
 3. 在合适的 flow 模块实现 `_run_xxx()`。
 4. 在 `workflows/dispatcher.py` 调度分支接入。
-5. 更新 `docs/workflows.md` 和本文。
+5. 更新 `docs/workflow-catalog.md`。
+6. 若流程顺序变化，同步 `docs/operation-flows.md`。
 
 ## 权限与审批
 
@@ -91,13 +92,19 @@
 ## 文档维护
 
 - `docs/module-map.md` 是新目录结构索引。
+- `docs/configuration.md` 说明 `_conf_schema.json` 配置项和安全边界。
+- `docs/data-storage.md` 说明插件 KV key、绑定结构、审批记录和健康快照。
+- `docs/multi-manager-architecture.md` 说明多 ncqq-manager 面板模型。
 - `docs/core-services.md` 说明底层服务层。
 - `docs/astrbot-tools.md` 说明 AstrBot 工具混入层。
 - `docs/workflow-engine.md` 说明 workflow 编排层。
+- `docs/workflow-catalog.md` 说明 workflow 列表、选择规则和调试命令。
+- `docs/group-chat-routing.md` 说明 OneBot v11 群聊路由和白名单。
+- `docs/approval-model.md` 说明审批边界和群内审批处理。
+- `docs/operation-flows.md` 说明核心操作流程图。
 - `docs/rendering-assets.md` 说明渲染和资产。
-- `docs/workflows.md` 面向模型说明 workflow 选择规则和流程。
+- `docs/workflows.md` 是 workflow 文档入口。
 - `docs/plugin-compliance.md` 记录 AstrBot 插件结构与发布合规检查。
-- `docs/current/overview.md` 和 `docs/current/task.md` 是当前改造状态摘要。
-- `HANDOFF.zh-CN.md` 是跨会话交接记录。
+- `docs/maintenance-policy.md` 记录修改边界、文档同步和大文件限制。
 
-本地接入测试、评审计划、临时分析记录放在根目录 `local-docs/`，该目录进入 `.gitignore`，不随正式版本归档。需要长期保留给后续模型接手的内容，应整理进上述功能命名文档，而不是提交临时记录。
+本地接入测试、评审计划、临时分析记录放在根目录 `local-docs/` 或 `docs/current/`，这两个目录进入 `.gitignore`，不随正式版本归档。需要长期保留给后续模型接手的内容，应整理进上述功能命名文档，而不是提交临时记录。

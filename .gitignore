@@ -10,3 +10,4 @@ venv/
 HANDOFF*.md
 data/
 local-docs/
+docs/current/

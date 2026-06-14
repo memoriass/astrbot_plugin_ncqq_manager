@@ -38,4 +38,5 @@
 2. `workflows/parsing.py` 增加 `/ncqq` 参数解析。
 3. 在 `workflows/instance_flows.py` 或 `workflows/admin_flows.py` 实现流程。
 4. `workflows/dispatcher.py` 接入调度。
-5. 更新 `docs/workflows.md`。
+5. 更新 `docs/workflow-catalog.md`。
+6. 若流程顺序变化，同步 `docs/operation-flows.md`。

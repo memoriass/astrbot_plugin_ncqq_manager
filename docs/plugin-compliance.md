@@ -1,41 +1,46 @@
-# AstrBot 插件合规检查
+# AstrBot 插件合规基线
 
-检查依据：AstrBot 开发文档 `dev/star/plugin-new.html` 与插件发布说明。
+依据：AstrBot 开发文档 `dev/star/plugin-new.html` 与插件发布说明。
 
-## 当前结论
+## 结构要求
 
-当前项目结构已按 AstrBot 插件约定补齐：
+插件发布包应保持以下结构和字段：
 
-| 项目 | 状态 | 说明 |
-| --- | --- | --- |
-| `metadata.yaml` | 已满足 | 位于插件根目录，包含 `name`、`display_name`、`author`、`desc`、`short_desc`、`version`、`repo`。 |
-| `astrbot_version` | 已满足 | 声明 `>=4.25.0,<5.0.0`，避免在未验证的旧版本 AstrBot 中加载。 |
-| `support_platforms` | 已满足 | 声明 `aiocqhttp`，按 OneBot v11 标准消息使用，不考虑 WeChat adapter。 |
-| `main.py` | 已满足 | 插件主类入口，显式导入 AstrBot API；`@register(...)` 的作者、版本、仓库地址与 `metadata.yaml` 对齐。 |
-| `__init__.py` | 已满足 | 导出插件类，保留包入口。 |
-| `_conf_schema.json` | 已满足 | 使用 AstrBot 支持的 `string`、`bool`、`int` 类型；多面板列表以 JSON 文本方式配置。 |
-| `logo.png` | 已满足 | 已替换为 AstrBot 与 ncqq 看板娘拥抱的扁平动画图标，正式图为官方推荐的 256x256 透明 PNG。 |
-| `requirements.txt` | 已满足 | 声明运行时外部依赖 `aiohttp`。 |
-| 日志入口 | 已满足 | 插件与脚本模块统一使用 `astrbot.api.logger`。 |
-| 大文件拆分 | 已满足 | 所有文本/代码文件均低于 500 行。 |
-| 发布包清洁度 | 已满足 | 已新增 `.gitignore` 并从版本库移除 Python 运行缓存与未使用候选图资产。 |
+| 项目 | 要求 |
+| --- | --- |
+| `metadata.yaml` | 位于插件根目录，包含 `name`、`display_name`、`author`、`desc`、`short_desc`、`version`、`repo`。 |
+| `astrbot_version` | 声明兼容范围，避免在未验证的 AstrBot 版本中加载。 |
+| `support_platforms` | 声明 `aiocqhttp`，按 OneBot v11 标准消息使用，不考虑 WeChat adapter。 |
+| `main.py` | 插件主类入口；`@register(...)` 的作者、版本、仓库地址与 `metadata.yaml` 对齐。 |
+| `__init__.py` | 导出插件类，保留包入口。 |
+| `_conf_schema.json` | 使用 AstrBot 支持的 `string`、`bool`、`int` 类型；多面板列表以 JSON 文本方式配置。 |
+| `logo.png` | 根目录正式插件图标，保持 1:1 透明 PNG。 |
+| `requirements.txt` | 声明运行时外部依赖。 |
+| `skills/` | 可选。仅在需要随插件提供 LLM 知识或提示词时新增；不把 `docs/*.md` 作为 Skill 来源。 |
+| 日志入口 | 插件模块统一使用 `astrbot.api.logger`。 |
+| 大文件限制 | Python、Markdown、JSON、YAML、HTML 文件均低于 500 行。 |
+| 发布包清洁度 | 不提交 Python 缓存、日志、本地配置、临时文档和未使用候选资产。 |
 
-## Plugin Pages 结论
+## Plugin Pages 边界
 
-AstrBot Plugin Pages 适合在第二阶段提供独立 WebUI，例如多面板连通性测试、实例总览、审批队列和健康看板。当前 2.1.0 先把多面板能力落在配置 schema、聊天 workflow 和权限模型里；简单配置仍使用 `_conf_schema.json`，避免同时引入页面前端和权限交互风险。
+Plugin Pages 适合提供独立 WebUI，例如多面板连通性测试、实例总览、审批队列和健康看板。简单配置继续使用 `_conf_schema.json`；只有当页面交互能明显降低管理复杂度时，才新增 `pages/<page>/index.html`。
 
 ## 结构约定
 
 - 插件入口层保持在根目录：`main.py`、`__init__.py`、`metadata.yaml`、`_conf_schema.json`、`logo.png`。
 - 运行代码按 `core/`、`tools/`、`workflows/`、`rendering/` 分层。
-- 面向后续模型接手的说明放在 `docs/architecture.md`、`docs/module-map.md` 和按架构功能命名的文档中，代码内只保留必要短注释或 docstring。根目录保留唯一 `README.md`。
+- 若后续新增 Plugin Pages，页面资源放入 `pages/`，并单独补充页面架构说明。
+- 若后续新增插件 Skill，资源放入 `skills/`，并说明它与 `@llm_tool` 的调用边界。
+- 面向后续模型接手的说明放在 `docs/architecture.md`、`docs/module-map.md` 和按架构功能命名的文档中，代码内只保留必要短注释或 docstring。
+- 根目录保留唯一 `README.md`。
+- 本地接入测试和当前任务记录放入 `local-docs/` 或 `docs/current/`，两者均被 git 排除，避免临时文档反复刷写正式提交。
 
-## 发布前复查
+## 发布复查
 
-发布或同步到远端前建议执行：
+发布或同步到远端前执行：
 
 ```powershell
-python -c "import json, pathlib; json.loads(pathlib.Path('_conf_schema.json').read_text(encoding='utf-8')); print('schema ok')"
-python -c "from pathlib import Path; files=['main.py',*map(str, Path('core').glob('*.py')),*map(str, Path('tools').glob('*.py')),*map(str, Path('workflows').glob('*.py')),*map(str, Path('rendering').glob('*.py'))]; [compile(Path(f).read_text(encoding='utf-8-sig'), f, 'exec') for f in files]; print('compile ok')"
+python -X utf8 -m compileall main.py core tools workflows rendering
+python -X utf8 -c "import json; json.load(open('_conf_schema.json', encoding='utf-8')); print('json ok')"
 git diff --check
 ```
