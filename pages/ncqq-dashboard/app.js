@@ -19,6 +19,7 @@
       {
         id: "local",
         name: "本地面板",
+        url: "http://127.0.0.1:8080",
         is_default: true,
         health: { ok: true, status: "ok", docker: true, state_engine: true, degraded_reasons: [] },
         bots: { ok: true, total: 5, online: 3 },
@@ -83,7 +84,65 @@
             },
           ],
         },
-        backends: { ok: true, total: 2, items: [{ alias: "astrbot" }, { alias: "cloud" }] },
+        backends: {
+          ok: true,
+          total: 2,
+          items: [
+            { alias: "astrbot", url: "ws://127.0.0.1:6199/ws", has_token: true },
+            { alias: "cloud", url: "wss://example.com/onebot/v11/ws", has_token: true },
+          ],
+        },
+      },
+      {
+        id: "cloud",
+        name: "云端面板",
+        url: "https://ncqq.example.com",
+        is_default: false,
+        health: { ok: true, status: "degraded", docker: true, state_engine: true, degraded_reasons: ["heartbeat"] },
+        bots: { ok: true, total: 3, online: 1 },
+        instances: {
+          ok: true,
+          running: 2,
+          online: 1,
+          total: 3,
+          items: [
+            {
+              name: "demo",
+              display_name: "demo",
+              status: "running",
+              running: true,
+              bot_online: true,
+              uin: "112233445",
+              avatar: "https://q1.qlogo.cn/g?b=qq&nk=112233445&s=100",
+            },
+            {
+              name: "ops",
+              display_name: "ops",
+              status: "running",
+              running: true,
+              bot_online: false,
+              uin: "223344556",
+              avatar: "https://q1.qlogo.cn/g?b=qq&nk=223344556&s=100",
+            },
+            {
+              name: "spare",
+              display_name: "spare",
+              status: "exited",
+              running: false,
+              bot_online: false,
+              uin: "",
+              avatar: "",
+            },
+          ],
+        },
+        backends: {
+          ok: true,
+          total: 2,
+          items: [
+            { alias: "astrbot-cloud", url: "wss://bot.example.com/onebot/v11/ws", has_token: true },
+            { alias: "backup", url: "wss://backup.example.com/onebot/v11/ws", has_token: false },
+          ],
+        },
       },
     ],
     approvals: [
@@ -131,6 +190,16 @@
     return `${text.slice(0, 3)}****${text.slice(-3)}`;
   }
 
+  function shortUrl(value) {
+    const text = String(value || "").trim();
+    if (!text || text === "-") return "-";
+    try {
+      return new URL(text).host;
+    } catch {
+      return text.replace(/^https?:\/\//, "").replace(/^wss?:\/\//, "");
+    }
+  }
+
   function instanceState(item) {
     if (item.bot_online) return { key: "online", text: "在线" };
     if (item.running) return { key: "warn", text: "心跳丢失" };
@@ -175,13 +244,13 @@
   function renderKpis(data) {
     const managers = data.managers || [];
     const approvals = data.approvals || [];
-    const running = managers.reduce((sum, item) => sum + Number(item.instances?.running || 0), 0);
     const total = managers.reduce((sum, item) => sum + Number(item.instances?.total || 0), 0);
     const online = managers.reduce((sum, item) => sum + Number(item.instances?.online || 0), 0);
+    const healthyManagers = managers.reduce((sum, item) => sum + (item.health?.ok ? 1 : 0), 0);
     const backendTotal = managers.reduce((sum, item) => sum + Number(item.backends?.total || 0), 0);
     els.kpis.innerHTML = [
+      kpi("ncqq 后端", `${healthyManagers}/${managers.length}`),
       kpi("实例在线", `${online}/${total}`),
-      kpi("容器运行", `${running}/${total}`),
       kpi("后端端点", backendTotal),
       kpi("待审批", approvals.length),
     ].join("");
@@ -201,25 +270,56 @@
 
   function renderManagerSection(manager) {
     const instances = manager.instances || {};
+    const backends = manager.backends || {};
     const health = manager.health || {};
     const items = instances.items || [];
     const warn = Boolean((health.degraded_reasons || []).length);
     const state = health.ok ? (warn ? "warn" : "online") : "offline";
+    const url = shortUrl(manager.url);
     return `
       <section class="manager-section">
         <div class="manager-title">
           <div>
             <h2>${escapeHtml(manager.name || manager.id)}</h2>
-            <p>${escapeHtml(manager.id)}${manager.is_default ? " · default" : ""}</p>
+            <p class="manager-url">${escapeHtml(manager.id)} · ${escapeHtml(url)}${manager.is_default ? " · default" : ""}</p>
           </div>
           <div class="manager-meta">
             <span class="status-chip ${state}">${escapeHtml(health.status || "-")}</span>
             <span>实例 ${escapeHtml(`${instances.online || 0}/${instances.total || 0}`)}</span>
-            <span>后端 ${escapeHtml(manager.backends?.total || 0)}</span>
+            <span>容器 ${escapeHtml(`${instances.running || 0}/${instances.total || 0}`)}</span>
+            <span>端点 ${escapeHtml(backends.total || 0)}</span>
           </div>
         </div>
+        ${renderBackendList(backends)}
         ${instances.ok ? `<div class="instance-grid">${items.map(renderInstanceCard).join("")}</div>` : empty(instances.error || "实例读取失败", true)}
       </section>
+    `;
+  }
+
+  function renderBackendList(backends) {
+    if (backends.ok === false) {
+      return `<div class="backend-list"><span class="backend-chip warn">${escapeHtml(backends.error || "端点读取失败")}</span></div>`;
+    }
+    const items = backends.items || [];
+    if (!items.length) {
+      return `<div class="backend-list"><span class="backend-chip">暂无端点</span></div>`;
+    }
+    return `
+      <div class="backend-list">
+        ${items.map(renderBackendChip).join("")}
+      </div>
+    `;
+  }
+
+  function renderBackendChip(item) {
+    const token = item.has_token ? "token" : "缺 token";
+    const state = item.has_token ? "" : " warn";
+    return `
+      <span class="backend-chip${state}">
+        <strong>${escapeHtml(item.alias || "-")}</strong>
+        <span>${escapeHtml(shortUrl(item.url))}</span>
+        <span>${escapeHtml(token)}</span>
+      </span>
     `;
   }
 

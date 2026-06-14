@@ -1,0 +1,275 @@
+.manager-grid {
+  display: grid;
+  gap: 22px;
+}
+
+.manager-section {
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.manager-section:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.manager-title {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 10px;
+}
+
+.manager-title h2,
+.manager-title p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manager-url {
+  margin-top: 3px;
+}
+
+.manager-meta,
+.backend-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.manager-meta {
+  justify-content: flex-end;
+  color: var(--muted);
+}
+
+.manager-meta span,
+.status-chip {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--soft);
+  white-space: nowrap;
+}
+
+.status-chip {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-chip.online {
+  color: var(--ok);
+  background: var(--ok-bg);
+}
+
+.status-chip.warn {
+  color: var(--warn);
+  background: var(--warn-bg);
+}
+
+.status-chip.offline {
+  color: var(--offline);
+  background: var(--offline-bg);
+}
+
+.backend-list {
+  margin: 0 0 12px;
+}
+
+.backend-chip {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.backend-chip strong {
+  max-width: 110px;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backend-chip.warn {
+  color: var(--warn);
+  background: var(--warn-bg);
+}
+
+.instance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 280px));
+  gap: 10px;
+  justify-content: start;
+}
+
+.instance-card {
+  position: relative;
+  min-height: 168px;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+}
+
+.instance-card.online {
+  border-color: color-mix(in srgb, var(--ok) 42%, var(--line));
+}
+
+.instance-card.warn {
+  border-color: color-mix(in srgb, var(--warn) 42%, var(--line));
+}
+
+.instance-card::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  background: var(--instance-bg, linear-gradient(135deg, var(--soft), var(--panel))) center / cover no-repeat;
+  filter: blur(4px);
+  opacity: 0.3;
+}
+
+.instance-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgb(255 255 255 / 70%), rgb(255 255 255 / 92%));
+}
+
+.instance-card-body,
+.instance-foot {
+  position: relative;
+  z-index: 1;
+}
+
+.instance-card-body {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 18px 16px 8px;
+  text-align: center;
+}
+
+.instance-card-body h3,
+.instance-card-body p {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.instance-card-body p {
+  font-size: 13px;
+}
+
+.instance-avatar {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 82%);
+}
+
+.instance-avatar img {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.empty-avatar span {
+  color: var(--offline);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.instance-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 14px 12px;
+}
+
+.instance-state {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  color: var(--offline);
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.instance-state::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.instance-state.online {
+  color: var(--ok);
+}
+
+.instance-state.warn {
+  color: var(--warn);
+}
+
+.instance-refresh {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 68%);
+  color: color-mix(in srgb, var(--text) 72%, var(--muted));
+  font-size: 20px;
+  line-height: 1;
+}
+
+[data-theme="dark"] .instance-card::after {
+  background: linear-gradient(180deg, rgb(32 38 44 / 72%), rgb(32 38 44 / 92%));
+}
+
+[data-theme="dark"] .instance-avatar,
+[data-theme="dark"] .instance-refresh {
+  background: rgb(20 24 28 / 72%);
+}
+
+@media (max-width: 760px) {
+  .instance-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .manager-title {
+    grid-template-columns: 1fr;
+  }
+
+  .manager-meta {
+    justify-content: flex-start;
+  }
+}
