@@ -14,7 +14,8 @@
 - main_workflows=manage_instance/query/manage_backend/review_approvals; detailed workflows remain directly callable but hidden from default list
 - architecture_docs=docs/architecture.md, docs/module-map.md, docs/core-services.md, docs/astrbot-tools.md, docs/workflow-engine.md, docs/rendering-assets.md
 - plugin_compliance=docs/plugin-compliance.md; metadata/main/schema/logo/requirements checked against AstrBot plugin docs
-- logo=generated minimal flat no-bot square icon; root logo.png is 256x256
+- logo=generated transparent flat mascot icon; root logo.png is 256x256 and shows AstrBot hugging ncqq
+- latest_docs_sync=metadata short_desc/astrbot_version/support_platforms plus explicit AstrBot API imports
 - requirements=aiohttp>=3.8
 - gitignore=ignore Python caches/logs/local virtualenvs; tracked Python bytecode removed from archive
 - synced_remote_hotfix=llm_tool docstring type labels and _conf_schema bool/int types

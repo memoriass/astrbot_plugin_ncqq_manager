@@ -8,12 +8,13 @@
 
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
-| `metadata.yaml` | 已满足 | 位于插件根目录，包含 `name`、`display_name`、`author`、`desc`、`version`、`repo`。 |
+| `metadata.yaml` | 已满足 | 位于插件根目录，包含 `name`、`display_name`、`author`、`desc`、`short_desc`、`version`、`repo`。 |
+| `astrbot_version` | 已满足 | 声明 `>=4.25.0,<5.0.0`，避免在未验证的旧版本 AstrBot 中加载。 |
 | `support_platforms` | 已满足 | 声明 `aiocqhttp`，按 OneBot v11 标准消息使用，不考虑 WeChat adapter。 |
-| `main.py` | 已满足 | 插件主类入口，使用 `@register(...)` 注册，作者、版本、仓库地址与 `metadata.yaml` 对齐。 |
+| `main.py` | 已满足 | 插件主类入口，显式导入 AstrBot API；`@register(...)` 的作者、版本、仓库地址与 `metadata.yaml` 对齐。 |
 | `__init__.py` | 已满足 | 导出插件类，保留包入口。 |
 | `_conf_schema.json` | 已满足 | 使用 AstrBot 支持的 `string`、`bool`、`int` 类型。 |
-| `logo.png` | 已满足 | 已替换为无 bot 元素的现代极简扁平图标，正式图为 256x256 正方形 PNG。 |
+| `logo.png` | 已满足 | 已替换为 AstrBot 与 ncqq 看板娘拥抱的扁平动画图标，正式图为官方推荐的 256x256 透明 PNG。 |
 | `requirements.txt` | 已满足 | 声明运行时外部依赖 `aiohttp`。 |
 | 日志入口 | 已满足 | 插件与脚本模块统一使用 `astrbot.api.logger`。 |
 | 大文件拆分 | 已满足 | 所有文本/代码文件均低于 500 行。 |

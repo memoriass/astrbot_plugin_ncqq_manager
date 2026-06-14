@@ -1,12 +1,13 @@
 import pathlib
 import re
 
-from astrbot.api import logger
-from astrbot.api.all import *
+from astrbot.api import logger, llm_tool
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.core.message.components import At, Plain, Reply
-from astrbot.core.star.star_tools import StarTools
+from astrbot.core.star import Context, Star
 from astrbot.core.star.filter.command import GreedyStr
+from astrbot.core.star.register import register_star as register
+from astrbot.core.star.star_tools import StarTools
 
 from .core.approval import claim_approval
 from .core.client import NCQQClient
@@ -23,7 +24,7 @@ from .workflows import run_ncqq_workflow, workflow_from_cli, workflow_from_tool
     "ncqq_manager",
     "memoriass",
     "NapCatQQ 容器控制与后端路由插件",
-    "2.0.3",
+    "2.0.4",
     "https://github.com/memoriass/astrbot_plugin_ncqq_manager",
 )
 class NCQQManagerPlugin(

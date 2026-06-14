@@ -44,8 +44,10 @@
   `docs/module-map.md`, and function-named architecture docs for future
   model-assisted maintenance.
 - Added AstrBot plugin compliance notes in `docs/plugin-compliance.md`.
-- Replaced root `logo.png` with a generated 256x256 minimal flat square icon
-  focused on container management, routing, and health status.
+- Replaced root `logo.png` with a generated 256x256 transparent flat mascot
+  icon showing AstrBot and ncqq mascots hugging.
+- Synced plugin metadata with latest AstrBot docs: `short_desc`,
+  `astrbot_version`, `support_platforms`, and explicit API imports.
 - Added `requirements.txt` for the external `aiohttp` runtime dependency.
 - Added `.gitignore` for Python caches, logs, and local virtualenvs; removed
   tracked Python bytecode from the archive.
