@@ -75,6 +75,32 @@
   background: var(--offline-bg);
 }
 
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pager button {
+  min-height: 30px;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.pager button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.stack .pager {
+  justify-content: center;
+  margin-top: 0;
+}
+
 .instance-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 280px));

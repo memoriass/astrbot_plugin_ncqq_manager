@@ -29,6 +29,7 @@ Page 端调用 bridge 时不写插件名前缀，例如 `bridge.apiGet("dashboar
 
 - manager 信息只返回 ID、名称、URL 和状态，不返回 API key。
 - Dashboard 按 manager 分组渲染，每个 ncqq-manager 面板独立展示健康、实例和容器摘要。
+- 实例和绑定关系在 Page 前端分页，`dashboard/summary` 仍一次返回当前摘要数据，不新增分页 API。
 - 实例卡片数据来自目标 manager 的 `/api/containers` 和 `/api/bots`，包括昵称、UIN、头像、登录阶段、心跳和容器状态。
 - 审批列表不返回原始 `params`，只返回页面展示所需的 manager、实例、后端别名和描述。
 - 绑定关系只读展示，不在页面修改。

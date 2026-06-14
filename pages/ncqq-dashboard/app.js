@@ -11,6 +11,8 @@
 
   let bridge = null;
   let currentData = null;
+  const pageSize = { instances: 6, bindings: 6 };
+  const pages = { instances: {}, bindings: 1 };
 
   const mockData = {
     generated_at: Date.now() / 1000,
@@ -22,12 +24,12 @@
         url: "http://127.0.0.1:8080",
         is_default: true,
         health: { ok: true, status: "ok", docker: true, state_engine: true, degraded_reasons: [] },
-        bots: { ok: true, total: 5, online: 3 },
+        bots: { ok: true, total: 8, online: 4 },
         instances: {
           ok: true,
-          running: 4,
-          online: 3,
-          total: 5,
+          running: 6,
+          online: 4,
+          total: 8,
           items: [
             {
               name: "baka9",
@@ -82,6 +84,9 @@
               login_stage: "offline",
               heartbeat_ts: Date.now() / 1000 - 5400,
             },
+            { name: "moka", display_name: "moka", status: "running", running: true, bot_online: true, uin: "100000001", avatar: "https://q1.qlogo.cn/g?b=qq&nk=100000001&s=100" },
+            { name: "kira", display_name: "kira", status: "running", running: true, bot_online: false, uin: "100000002", avatar: "https://q1.qlogo.cn/g?b=qq&nk=100000002&s=100" },
+            { name: "nana", display_name: "nana", status: "exited", running: false, bot_online: false, uin: "", avatar: "" },
           ],
         },
       },
@@ -144,6 +149,12 @@
     bindings: [
       { qq: "123456", nickname: "Alice", instances: ["local/baka9", "cloud/demo"] },
       { qq: "654321", nickname: "", instances: ["local/miya"] },
+      { qq: "100001", nickname: "B01", instances: ["local/moka"] },
+      { qq: "100002", nickname: "B02", instances: ["local/kira"] },
+      { qq: "100003", nickname: "B03", instances: ["local/nana"] },
+      { qq: "100004", nickname: "B04", instances: ["cloud/ops"] },
+      { qq: "100005", nickname: "B05", instances: ["cloud/spare"] },
+      { qq: "100006", nickname: "B06", instances: ["local/698076448"] },
     ],
   };
 
@@ -188,6 +199,28 @@
     if (item.bot_online) return { key: "online", text: "在线" };
     if (item.running) return { key: "warn", text: "心跳丢失" };
     return { key: "offline", text: "离线" };
+  }
+
+  function clampPage(value, total, size) {
+    const max = Math.max(1, Math.ceil(total / size));
+    const page = Number(value || 1);
+    return Math.min(Math.max(1, page), max);
+  }
+
+  function pageSlice(items, page, size) {
+    return items.slice((page - 1) * size, page * size);
+  }
+
+  function renderPager(scope, key, page, total, size) {
+    const max = Math.ceil(total / size);
+    if (max <= 1) return "";
+    return `
+      <div class="pager" aria-label="分页">
+        <button type="button" data-page-scope="${escapeHtml(scope)}" data-page-key="${escapeHtml(key)}" data-page="${page - 1}" ${page <= 1 ? "disabled" : ""}>上一页</button>
+        <span>${page}/${max}</span>
+        <button type="button" data-page-scope="${escapeHtml(scope)}" data-page-key="${escapeHtml(key)}" data-page="${page + 1}" ${page >= max ? "disabled" : ""}>下一页</button>
+      </div>
+    `;
   }
 
   async function initBridge() {
@@ -256,9 +289,12 @@
     const instances = manager.instances || {};
     const health = manager.health || {};
     const items = instances.items || [];
+    const page = clampPage(pages.instances[manager.id], items.length, pageSize.instances);
+    const pageItems = pageSlice(items, page, pageSize.instances);
     const warn = Boolean((health.degraded_reasons || []).length);
     const state = health.ok ? (warn ? "warn" : "online") : "offline";
     const url = shortUrl(manager.url);
+    pages.instances[manager.id] = page;
     return `
       <section class="manager-section">
         <div class="manager-title">
@@ -272,9 +308,14 @@
             <span>容器 ${escapeHtml(`${instances.running || 0}/${instances.total || 0}`)}</span>
           </div>
         </div>
-        ${instances.ok ? `<div class="instance-grid">${items.map(renderInstanceCard).join("")}</div>` : empty(instances.error || "实例读取失败", true)}
+        ${instances.ok ? renderInstancePage(pageItems, manager.id, page, items.length) : empty(instances.error || "实例读取失败", true)}
       </section>
     `;
+  }
+
+  function renderInstancePage(items, managerId, page, total) {
+    const body = items.length ? `<div class="instance-grid">${items.map(renderInstanceCard).join("")}</div>` : empty("暂无实例");
+    return body + renderPager("instances", managerId, page, total, pageSize.instances);
   }
 
   function renderInstanceCard(item) {
@@ -328,7 +369,10 @@
       els.bindings.innerHTML = empty("暂无绑定");
       return;
     }
-    els.bindings.innerHTML = bindings
+    const page = clampPage(pages.bindings, bindings.length, pageSize.bindings);
+    const items = pageSlice(bindings, page, pageSize.bindings);
+    pages.bindings = page;
+    els.bindings.innerHTML = items
       .map(
         (item) => `
         <div class="binding">
@@ -338,7 +382,7 @@
         </div>
       `,
       )
-      .join("");
+      .join("") + renderPager("bindings", "bindings", page, bindings.length, pageSize.bindings);
   }
 
   function empty(text, error) {
@@ -374,12 +418,23 @@
     window.setTimeout(() => els.toast.classList.remove("show"), 2400);
   }
 
+  function handlePageButton(event) {
+    const button = event.target.closest("button[data-page-scope]");
+    if (!button) return false;
+    if (button.dataset.pageScope === "instances") pages.instances[button.dataset.pageKey] = Number(button.dataset.page);
+    if (button.dataset.pageScope === "bindings") pages.bindings = Number(button.dataset.page);
+    if (currentData) render(currentData);
+    return true;
+  }
+
   els.refresh.addEventListener("click", loadData);
   els.managers.addEventListener("click", (event) => {
+    if (handlePageButton(event)) return;
     const button = event.target.closest("button[data-refresh]");
     if (!button) return;
     loadData();
   });
+  els.bindings.addEventListener("click", handlePageButton);
   els.approvals.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-action]");
     if (!button) return;
