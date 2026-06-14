@@ -386,20 +386,46 @@
       els.bindings.innerHTML = empty("暂无绑定");
       return;
     }
+    const lookup = buildInstanceLookup(currentData?.managers || []);
     const page = clampPage(pages.bindings, bindings.length, pageSize.bindings);
     const items = pageSlice(bindings, page, pageSize.bindings);
     pages.bindings = page;
     els.bindings.innerHTML = `<div class="binding-grid">${items
-      .map(
-        (item) => `
-        <div class="binding">
-          <strong>${escapeHtml(item.nickname || item.qq)}</strong>
-          <span>${escapeHtml(item.qq)}</span>
-          <p>${escapeHtml((item.instances || []).join(" · ") || "-")}</p>
-        </div>
-      `,
-      )
+      .map((item) => renderBindingCard(item, lookup))
       .join("")}</div>${renderPager("bindings", "bindings", page, bindings.length, pageSize.bindings)}`;
+  }
+
+  function buildInstanceLookup(managers) {
+    const lookup = {};
+    managers.forEach((manager) => {
+      (manager.instances?.items || []).forEach((item) => {
+        [item.name, item.display_name].filter(Boolean).forEach((name) => {
+          lookup[`${manager.id}/${name}`] = item;
+          if (manager.is_default) lookup[name] = item;
+        });
+      });
+    });
+    return lookup;
+  }
+
+  function renderBindingCard(item, lookup) {
+    const refs = item.instances || [];
+    const primary = refs.map((ref) => lookup[ref]).find(Boolean) || {};
+    const avatar = String(primary.avatar || "").trim();
+    const label = primary.display_name || primary.name || refs[0] || "-";
+    const initial = String(label).slice(0, 1).toUpperCase();
+    return `
+      <article class="binding binding-card">
+        <div class="binding-avatar${avatar ? "" : " no-avatar"}">
+          ${avatar ? `<img src="${escapeHtml(avatar)}" alt="" loading="lazy" onerror="this.remove()" />` : `<span>${escapeHtml(initial)}</span>`}
+        </div>
+        <strong>${escapeHtml(item.qq || "-")}</strong>
+        <p>${escapeHtml(label)}</p>
+        <div class="binding-refs">
+          ${refs.map((ref) => `<span>${escapeHtml(ref)}</span>`).join("") || "<span>-</span>"}
+        </div>
+      </article>
+    `;
   }
 
   function empty(text, error) {
