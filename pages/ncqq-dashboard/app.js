@@ -12,157 +12,17 @@
   let bridge = null;
   let currentData = null;
   let activeView = "instances";
+  let activeManagerId = "";
+  let instanceFilter = "all";
   const pageSize = { instances: 9, bindings: 8 };
   const pages = { instances: {}, bindings: 1 };
-
-  const mockData = {
-    generated_at: Date.now() / 1000,
-    default_manager: "local",
-    managers: [
-      {
-        id: "local",
-        name: "本地面板",
-        url: "http://127.0.0.1:8080",
-        is_default: true,
-        health: { ok: true, status: "ok", docker: true, state_engine: true, degraded_reasons: [] },
-        bots: { ok: true, total: 10, online: 5 },
-        instances: {
-          ok: true,
-          running: 7,
-          online: 5,
-          total: 10,
-          items: [
-            {
-              name: "baka9",
-              display_name: "baka9",
-              status: "running",
-              running: true,
-              bot_online: true,
-              uin: "315000754",
-              avatar: "https://q1.qlogo.cn/g?b=qq&nk=315000754&s=100",
-              login_stage: "logged_in",
-              login_method: "sdk_ws",
-              heartbeat_ts: Date.now() / 1000 - 60,
-            },
-            {
-              name: "698076448",
-              display_name: "698076448",
-              status: "running",
-              running: true,
-              bot_online: true,
-              uin: "171000139",
-              avatar: "https://q1.qlogo.cn/g?b=qq&nk=171000139&s=100",
-              login_stage: "logged_in",
-            },
-            {
-              name: "788952021",
-              display_name: "788952021",
-              status: "exited",
-              running: false,
-              bot_online: false,
-              uin: "",
-              avatar: "",
-              login_stage: "offline",
-            },
-            {
-              name: "1154121306",
-              display_name: "1154121306",
-              status: "exited",
-              running: false,
-              bot_online: false,
-              uin: "",
-              avatar: "",
-              login_stage: "offline",
-            },
-            {
-              name: "miya",
-              display_name: "miya",
-              status: "running",
-              running: true,
-              bot_online: false,
-              uin: "240000846",
-              avatar: "https://q1.qlogo.cn/g?b=qq&nk=240000846&s=100",
-              login_stage: "offline",
-              heartbeat_ts: Date.now() / 1000 - 5400,
-            },
-            { name: "moka", display_name: "moka", status: "running", running: true, bot_online: true, uin: "100000001", avatar: "https://q1.qlogo.cn/g?b=qq&nk=100000001&s=100" },
-            { name: "kira", display_name: "kira", status: "running", running: true, bot_online: false, uin: "100000002", avatar: "https://q1.qlogo.cn/g?b=qq&nk=100000002&s=100" },
-            { name: "nana", display_name: "nana", status: "exited", running: false, bot_online: false, uin: "", avatar: "" },
-            { name: "sora", display_name: "sora", status: "running", running: true, bot_online: true, uin: "100000003", avatar: "https://q1.qlogo.cn/g?b=qq&nk=100000003&s=100" },
-            { name: "yuki", display_name: "yuki", status: "running", running: true, bot_online: true, uin: "100000004", avatar: "https://q1.qlogo.cn/g?b=qq&nk=100000004&s=100" },
-          ],
-        },
-      },
-      {
-        id: "cloud",
-        name: "云端面板",
-        url: "https://ncqq.example.com",
-        is_default: false,
-        health: { ok: true, status: "degraded", docker: true, state_engine: true, degraded_reasons: ["heartbeat"] },
-        bots: { ok: true, total: 3, online: 1 },
-        instances: {
-          ok: true,
-          running: 2,
-          online: 1,
-          total: 3,
-          items: [
-            {
-              name: "demo",
-              display_name: "demo",
-              status: "running",
-              running: true,
-              bot_online: true,
-              uin: "112233445",
-              avatar: "https://q1.qlogo.cn/g?b=qq&nk=112233445&s=100",
-            },
-            {
-              name: "ops",
-              display_name: "ops",
-              status: "running",
-              running: true,
-              bot_online: false,
-              uin: "223344556",
-              avatar: "https://q1.qlogo.cn/g?b=qq&nk=223344556&s=100",
-            },
-            {
-              name: "spare",
-              display_name: "spare",
-              status: "exited",
-              running: false,
-              bot_online: false,
-              uin: "",
-              avatar: "",
-            },
-          ],
-        },
-      },
-    ],
-    approvals: [
-      {
-        approval_id: "AB12CD",
-        action: "delete",
-        description: "销毁实例 cloud/demo",
-        requester_qq: "123456",
-        group_id: "987654",
-        age_seconds: 420,
-        manager_id: "cloud",
-        instance_name: "demo",
-      },
-    ],
-    bindings: [
-      { qq: "123456", nickname: "Alice", instances: ["local/baka9", "cloud/demo"] },
-      { qq: "654321", nickname: "", instances: ["local/miya"] },
-      { qq: "100001", nickname: "B01", instances: ["local/moka"] },
-      { qq: "100002", nickname: "B02", instances: ["local/kira"] },
-      { qq: "100003", nickname: "B03", instances: ["local/nana"] },
-      { qq: "100004", nickname: "B04", instances: ["cloud/ops"] },
-      { qq: "100005", nickname: "B05", instances: ["cloud/spare"] },
-      { qq: "100006", nickname: "B06", instances: ["local/698076448"] },
-      { qq: "100007", nickname: "B07", instances: ["local/sora"] },
-      { qq: "100008", nickname: "B08", instances: ["local/yuki"] },
-      { qq: "100009", nickname: "B09", instances: ["cloud/demo"] },
-    ],
-  };
+  const mockData = window.NcqqDashboardMockData || { managers: [], approvals: [], bindings: [] };
+  const instanceFilters = [
+    ["all", "全部"],
+    ["abnormal", "异常"],
+    ["warn", "心跳"],
+    ["offline", "离线"],
+  ];
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -200,6 +60,26 @@
     if (item.bot_online) return { key: "online", text: "在线" };
     if (item.running) return { key: "warn", text: "心跳丢失" };
     return { key: "offline", text: "离线" };
+  }
+
+  function managerState(health) {
+    const warn = Boolean((health.degraded_reasons || []).length);
+    return health.ok ? (warn ? "warn" : "online") : "offline";
+  }
+
+  function ensureActiveManager(managers) {
+    if (managers.some((item) => item.id === activeManagerId)) return;
+    const preferred = managers.find((item) => item.id === currentData?.default_manager);
+    activeManagerId = (preferred || managers[0] || {}).id || "";
+  }
+
+  function filterInstances(items) {
+    if (instanceFilter === "all") return items;
+    return items.filter((item) => {
+      const key = instanceState(item).key;
+      if (instanceFilter === "abnormal") return key !== "online";
+      return key === instanceFilter;
+    });
   }
 
   function clampPage(value, total, size) {
@@ -290,17 +170,42 @@
       els.managers.innerHTML = empty("暂无 Manager");
       return;
     }
-    els.managers.innerHTML = managers.map(renderManagerSection).join("");
+    ensureActiveManager(managers);
+    const manager = managers.find((item) => item.id === activeManagerId) || managers[0];
+    els.managers.innerHTML = renderManagerSelector(managers) + renderManagerSection(manager);
+  }
+
+  function renderManagerSelector(managers) {
+    return `<div class="manager-selector" aria-label="后端选择">${managers.map(renderManagerCard).join("")}</div>`;
+  }
+
+  function renderManagerCard(manager) {
+    const instances = manager.instances || {};
+    const state = managerState(manager.health || {});
+    const url = shortUrl(manager.url);
+    return `
+      <button class="manager-card ${manager.id === activeManagerId ? "active" : ""}" type="button" data-manager-id="${escapeHtml(manager.id)}" aria-pressed="${manager.id === activeManagerId}">
+        <span class="manager-card-head">
+          <strong>${escapeHtml(manager.name || manager.id)}</strong>
+          <span class="status-chip ${state}">${escapeHtml(manager.health?.status || "-")}</span>
+        </span>
+        <span class="manager-card-url">${escapeHtml(manager.id)} · ${escapeHtml(url)}${manager.is_default ? " · default" : ""}</span>
+        <span class="manager-card-stats">
+          <span>实例 ${escapeHtml(`${instances.online || 0}/${instances.total || 0}`)}</span>
+          <span>容器 ${escapeHtml(`${instances.running || 0}/${instances.total || 0}`)}</span>
+        </span>
+      </button>
+    `;
   }
 
   function renderManagerSection(manager) {
     const instances = manager.instances || {};
     const health = manager.health || {};
     const items = instances.items || [];
-    const page = clampPage(pages.instances[manager.id], items.length, pageSize.instances);
-    const pageItems = pageSlice(items, page, pageSize.instances);
-    const warn = Boolean((health.degraded_reasons || []).length);
-    const state = health.ok ? (warn ? "warn" : "online") : "offline";
+    const filtered = filterInstances(items);
+    const page = clampPage(pages.instances[manager.id], filtered.length, pageSize.instances);
+    const pageItems = pageSlice(filtered, page, pageSize.instances);
+    const state = managerState(health);
     const url = shortUrl(manager.url);
     pages.instances[manager.id] = page;
     return `
@@ -310,15 +215,34 @@
             <h2>${escapeHtml(manager.name || manager.id)}</h2>
             <p class="manager-url">${escapeHtml(manager.id)} · ${escapeHtml(url)}${manager.is_default ? " · default" : ""}</p>
           </div>
-          <div class="manager-meta">
-            <span class="status-chip ${state}">${escapeHtml(health.status || "-")}</span>
-            <span>实例 ${escapeHtml(`${instances.online || 0}/${instances.total || 0}`)}</span>
-            <span>容器 ${escapeHtml(`${instances.running || 0}/${instances.total || 0}`)}</span>
+          <div class="manager-actions">
+            ${renderInstanceFilters(items)}
+            <div class="manager-meta">
+              <span class="status-chip ${state}">${escapeHtml(health.status || "-")}</span>
+              <span>实例 ${escapeHtml(`${instances.online || 0}/${instances.total || 0}`)}</span>
+              <span>容器 ${escapeHtml(`${instances.running || 0}/${instances.total || 0}`)}</span>
+              ${instanceFilter === "all" ? "" : `<span>显示 ${escapeHtml(`${filtered.length}/${items.length}`)}</span>`}
+            </div>
           </div>
         </div>
-        ${instances.ok ? renderInstancePage(pageItems, manager.id, page, items.length) : empty(instances.error || "实例读取失败", true)}
+        ${instances.ok ? renderInstancePage(pageItems, manager.id, page, filtered.length) : empty(instances.error || "实例读取失败", true)}
       </section>
     `;
+  }
+
+  function renderInstanceFilters(items) {
+    const counts = { all: items.length, abnormal: 0, warn: 0, offline: 0 };
+    items.forEach((item) => {
+      const key = instanceState(item).key;
+      if (key !== "online") counts.abnormal += 1;
+      if (counts[key] !== undefined) counts[key] += 1;
+    });
+    return `<div class="instance-filter" aria-label="实例筛选">${instanceFilters
+      .map(
+        ([key, label]) =>
+          `<button class="${key === instanceFilter ? "active" : ""}" type="button" data-instance-filter="${key}">${label}<span>${counts[key]}</span></button>`,
+      )
+      .join("")}</div>`;
   }
 
   function renderInstancePage(items, managerId, page, total) {
@@ -469,6 +393,19 @@
   });
   els.managers.addEventListener("click", (event) => {
     if (handlePageButton(event)) return;
+    const managerButton = event.target.closest("button[data-manager-id]");
+    if (managerButton) {
+      activeManagerId = managerButton.dataset.managerId || "";
+      if (currentData) renderManagers(currentData.managers || []);
+      return;
+    }
+    const filterButton = event.target.closest("button[data-instance-filter]");
+    if (filterButton) {
+      instanceFilter = filterButton.dataset.instanceFilter || "all";
+      if (activeManagerId) pages.instances[activeManagerId] = 1;
+      if (currentData) renderManagers(currentData.managers || []);
+      return;
+    }
     const button = event.target.closest("button[data-refresh]");
     if (!button) return;
     loadData();

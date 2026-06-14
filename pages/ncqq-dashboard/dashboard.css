@@ -43,6 +43,60 @@
   gap: 14px;
 }
 
+.manager-selector {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.manager-card {
+  min-height: 104px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 12px;
+  text-align: left;
+}
+
+.manager-card.active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.manager-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.manager-card-head strong,
+.manager-card-url {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manager-card-url {
+  color: var(--muted);
+}
+
+.manager-card-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.manager-card-stats span {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--soft);
+}
+
 .manager-section {
   padding-top: 18px;
   border-top: 1px solid var(--line);
@@ -61,6 +115,13 @@
   margin-bottom: 10px;
 }
 
+.manager-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .manager-title h2,
 .manager-title p {
   overflow: hidden;
@@ -70,6 +131,37 @@
 
 .manager-url {
   margin-top: 3px;
+}
+
+.instance-filter {
+  min-height: 32px;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+}
+
+.instance-filter button {
+  min-height: 26px;
+  padding: 3px 9px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.instance-filter button.active {
+  background: var(--accent);
+  color: var(--panel);
+}
+
+.instance-filter span {
+  margin-left: 4px;
+  opacity: 0.76;
 }
 
 .manager-meta {
@@ -374,6 +466,7 @@
     grid-template-columns: 1fr;
   }
 
+  .manager-actions,
   .manager-meta {
     justify-content: flex-start;
   }
