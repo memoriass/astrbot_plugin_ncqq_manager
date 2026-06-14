@@ -11,7 +11,7 @@
 
   let bridge = null;
   let currentData = null;
-  const pageSize = { instances: 6, bindings: 6 };
+  const pageSize = { instances: 9, bindings: 8 };
   const pages = { instances: {}, bindings: 1 };
 
   const mockData = {
@@ -24,12 +24,12 @@
         url: "http://127.0.0.1:8080",
         is_default: true,
         health: { ok: true, status: "ok", docker: true, state_engine: true, degraded_reasons: [] },
-        bots: { ok: true, total: 8, online: 4 },
+        bots: { ok: true, total: 10, online: 5 },
         instances: {
           ok: true,
-          running: 6,
-          online: 4,
-          total: 8,
+          running: 7,
+          online: 5,
+          total: 10,
           items: [
             {
               name: "baka9",
@@ -87,6 +87,8 @@
             { name: "moka", display_name: "moka", status: "running", running: true, bot_online: true, uin: "100000001", avatar: "https://q1.qlogo.cn/g?b=qq&nk=100000001&s=100" },
             { name: "kira", display_name: "kira", status: "running", running: true, bot_online: false, uin: "100000002", avatar: "https://q1.qlogo.cn/g?b=qq&nk=100000002&s=100" },
             { name: "nana", display_name: "nana", status: "exited", running: false, bot_online: false, uin: "", avatar: "" },
+            { name: "sora", display_name: "sora", status: "running", running: true, bot_online: true, uin: "100000003", avatar: "https://q1.qlogo.cn/g?b=qq&nk=100000003&s=100" },
+            { name: "yuki", display_name: "yuki", status: "running", running: true, bot_online: true, uin: "100000004", avatar: "https://q1.qlogo.cn/g?b=qq&nk=100000004&s=100" },
           ],
         },
       },
@@ -155,6 +157,9 @@
       { qq: "100004", nickname: "B04", instances: ["cloud/ops"] },
       { qq: "100005", nickname: "B05", instances: ["cloud/spare"] },
       { qq: "100006", nickname: "B06", instances: ["local/698076448"] },
+      { qq: "100007", nickname: "B07", instances: ["local/sora"] },
+      { qq: "100008", nickname: "B08", instances: ["local/yuki"] },
+      { qq: "100009", nickname: "B09", instances: ["cloud/demo"] },
     ],
   };
 
