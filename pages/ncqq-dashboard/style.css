@@ -64,27 +64,11 @@ button:disabled {
   padding: 22px;
 }
 
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.topbar {
-  margin-bottom: 16px;
-}
-
 h1,
 h2,
 h3,
 p {
   margin: 0;
-}
-
-h1 {
-  font-size: 24px;
-  line-height: 1.2;
 }
 
 h2 {
@@ -107,6 +91,18 @@ p {
   display: grid;
   place-items: center;
   font-size: 18px;
+}
+
+.overview-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  gap: 14px;
+  align-items: start;
+  margin-bottom: 18px;
+}
+
+.overview-row .kpi-grid {
+  margin-bottom: 0;
 }
 
 .spin {
@@ -248,9 +244,5 @@ p {
 @media (max-width: 520px) {
   .kpi-grid {
     grid-template-columns: 1fr;
-  }
-
-  .topbar {
-    align-items: flex-start;
   }
 }

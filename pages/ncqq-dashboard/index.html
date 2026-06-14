@@ -9,17 +9,12 @@
   </head>
   <body>
     <div class="shell">
-      <header class="topbar">
-        <div>
-          <h1>ncqq 管理</h1>
-          <p id="context-line">-</p>
-        </div>
+      <div class="overview-row">
+        <section id="kpis" class="kpi-grid" aria-label="概览"></section>
         <button id="refresh" class="icon-button" type="button" title="刷新" aria-label="刷新">
           ↻
         </button>
-      </header>
-
-      <section id="kpis" class="kpi-grid" aria-label="概览"></section>
+      </div>
 
       <nav id="view-tabs" class="view-tabs" aria-label="页面切换">
         <button class="tab-button active" type="button" data-view="instances">实例</button>

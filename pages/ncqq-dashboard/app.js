@@ -2,7 +2,6 @@
   const els = {
     approvals: document.getElementById("approvals"),
     bindings: document.getElementById("bindings"),
-    contextLine: document.getElementById("context-line"),
     kpis: document.getElementById("kpis"),
     managers: document.getElementById("managers"),
     refresh: document.getElementById("refresh"),
@@ -174,11 +173,6 @@
       .replace(/'/g, "&#39;");
   }
 
-  function fmtTime(seconds) {
-    if (!seconds) return "-";
-    return new Date(seconds * 1000).toLocaleString("zh-CN", { hour12: false });
-  }
-
   function fmtAge(seconds) {
     const value = Number(seconds || 0);
     if (value < 60) return `${value}s`;
@@ -233,11 +227,9 @@
   async function initBridge() {
     if (window.AstrBotPluginPage) {
       bridge = window.AstrBotPluginPage;
-      const context = await bridge.ready();
-      els.contextLine.textContent = `${context.displayName || "ncqq_manager"} · ${context.pageName || "dashboard"}`;
+      await bridge.ready();
       return;
     }
-    els.contextLine.textContent = "local preview";
   }
 
   async function loadData() {
@@ -272,7 +264,6 @@
     renderManagers(data.managers || []);
     renderApprovals(data.approvals || []);
     renderBindings(data.bindings || []);
-    if (bridge) els.contextLine.textContent = `更新 ${fmtTime(data.generated_at)}`;
   }
 
   function renderKpis(data) {
