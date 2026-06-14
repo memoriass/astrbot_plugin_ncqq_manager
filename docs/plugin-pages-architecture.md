@@ -9,7 +9,7 @@
 | `pages/ncqq-dashboard/index.html` | AstrBot 扫描入口。 |
 | `pages/ncqq-dashboard/app.js` | 通过 `window.AstrBotPluginPage` bridge 调用插件 API 并渲染页面。 |
 | `pages/ncqq-dashboard/style.css` | 基础布局、侧栏和通用控件样式。 |
-| `pages/ncqq-dashboard/dashboard.css` | 多面板分组、端点条和实例状态卡样式。 |
+| `pages/ncqq-dashboard/dashboard.css` | 多面板分组和实例状态卡样式。 |
 
 页面可在无 bridge 环境下使用预览数据渲染，便于本地检查多面板布局。正式运行时只通过 bridge 请求后端。
 
@@ -19,7 +19,7 @@
 
 | Dashboard endpoint | 方法 | 说明 |
 | --- | --- | --- |
-| `dashboard/summary` | `GET` | 汇总 manager 健康、实例、后端、审批、绑定和健康快照。 |
+| `dashboard/summary` | `GET` | 汇总 manager 健康、实例、审批、绑定和健康快照。 |
 | `approvals/<approval_id>/approve` | `POST` | 原子领取审批并复用现有审批执行器批准。 |
 | `approvals/<approval_id>/reject` | `POST` | 原子领取审批并拒绝。 |
 
@@ -28,9 +28,8 @@ Page 端调用 bridge 时不写插件名前缀，例如 `bridge.apiGet("dashboar
 ## 数据边界
 
 - manager 信息只返回 ID、名称、URL 和状态，不返回 API key。
-- Dashboard 按 manager 分组渲染，每个 ncqq-manager 面板独立展示健康、实例、容器和端点摘要。
+- Dashboard 按 manager 分组渲染，每个 ncqq-manager 面板独立展示健康、实例和容器摘要。
 - 实例卡片数据来自目标 manager 的 `/api/containers` 和 `/api/bots`，包括昵称、UIN、头像、登录阶段、心跳和容器状态。
-- 后端端点只返回 alias、URL 和 token 是否存在，不返回 token 明文。
 - 审批列表不返回原始 `params`，只返回页面展示所需的 manager、实例、后端别名和描述。
 - 绑定关系只读展示，不在页面修改。
 - 健康快照只展示 `manager/instance` 与在线状态。
@@ -42,7 +41,7 @@ Page 第一版只允许审批：
 - approve：调用 `claim_approval()` 后执行 `_dispatch_approved_action()`。
 - reject：调用 `claim_approval()` 后移除记录。
 
-不在 Page 中提供实例启动、停止、重启、二维码、后端接入、配置编辑或批量跨 manager 操作。这些能力继续由聊天 workflow 和审批模型承接。
+不在 Page 中提供实例启动、停止、重启、二维码、后端端点查看/接入、配置编辑或批量跨 manager 操作。这些能力继续由聊天 workflow 和审批模型承接。
 
 ## 维护要求
 

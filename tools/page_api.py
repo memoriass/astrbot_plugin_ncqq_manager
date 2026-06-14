@@ -8,7 +8,6 @@ from astrbot.api import logger
 from astrbot.api.web import error_response, json_response, request
 
 from ..core.approval import claim_approval, list_approvals
-from ..workflows.access import _list_backend_endpoints
 from ..workflows.common import _container_name, _is_running, _list_containers, _manager_get
 
 PLUGIN_ROUTE_PREFIX = "/astrbot_plugin_ncqq_manager"
@@ -91,12 +90,10 @@ class PageApiMixin:
         health_task = _manager_get(self, "/api/health", manager_id)
         bots_task = _manager_get(self, "/api/bots", manager_id)
         containers_task = _list_containers(self, manager_id)
-        endpoints_task = _list_backend_endpoints(self, manager_id)
-        health, bots, containers, endpoints = await asyncio.gather(
+        health, bots, containers = await asyncio.gather(
             health_task,
             bots_task,
             containers_task,
-            endpoints_task,
             return_exceptions=True,
         )
         bot_lookup = _page_bot_lookup(bots)
@@ -108,7 +105,6 @@ class PageApiMixin:
             "health": _page_health(health),
             "bots": _page_bots(bots),
             "instances": _page_instances(containers, bot_lookup, profile.manager_url),
-            "backends": _page_backends(endpoints),
         }
 
     async def _page_approvals(self) -> list[dict[str, Any]]:
@@ -285,21 +281,3 @@ def _page_absolute_url(value: str, base_url: str) -> str:
     if value.startswith("/") and base_url:
         return base_url.rstrip("/") + value
     return value
-
-
-def _page_backends(result: Any) -> dict[str, Any]:
-    if isinstance(result, Exception):
-        return {"ok": False, "items": [], "error": str(result), "total": 0}
-    ok, endpoints, error = result
-    if not ok:
-        return {"ok": False, "items": [], "error": error, "total": 0}
-    items = [
-        {
-            "alias": str(item.get("alias") or "-"),
-            "url": str(item.get("url") or "-"),
-            "has_token": bool(item.get("token")),
-        }
-        for item in endpoints
-        if isinstance(item, dict)
-    ]
-    return {"ok": True, "items": items, "total": len(items)}

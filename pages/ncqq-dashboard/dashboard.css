@@ -32,8 +32,7 @@
   margin-top: 3px;
 }
 
-.manager-meta,
-.backend-list {
+.manager-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -74,36 +73,6 @@
 .status-chip.offline {
   color: var(--offline);
   background: var(--offline-bg);
-}
-
-.backend-list {
-  margin: 0 0 12px;
-}
-
-.backend-chip {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 9px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--panel);
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.backend-chip strong {
-  max-width: 110px;
-  overflow: hidden;
-  color: var(--text);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.backend-chip.warn {
-  color: var(--warn);
-  background: var(--warn-bg);
 }
 
 .instance-grid {
