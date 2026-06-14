@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ncqq Dashboard</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div>
+          <h1>ncqq 管理</h1>
+          <p id="context-line">-</p>
+        </div>
+        <button id="refresh" class="icon-button" type="button" title="刷新" aria-label="刷新">
+          ↻
+        </button>
+      </header>
+
+      <section id="kpis" class="kpi-grid" aria-label="概览"></section>
+
+      <main class="content-grid">
+        <section class="panel panel-wide">
+          <div class="section-head">
+            <h2>Manager</h2>
+          </div>
+          <div id="managers" class="manager-grid"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h2>审批</h2>
+          </div>
+          <div id="approvals" class="stack"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h2>绑定</h2>
+          </div>
+          <div id="bindings" class="stack compact"></div>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script src="./app.js" defer></script>
+  </body>
+</html>

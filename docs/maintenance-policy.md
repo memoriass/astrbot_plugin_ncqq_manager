@@ -29,6 +29,7 @@
 - `docs/core-services.md`
 - `docs/astrbot-tools.md`
 - `docs/rendering-assets.md`
+- `docs/plugin-pages-architecture.md`
 - `docs/plugin-compliance.md`
 - `docs/maintenance-policy.md`
 
@@ -55,6 +56,7 @@
 | 底层 API 封装或 client 行为 | `docs/core-services.md` |
 | AstrBot tool、命令入口或 mixin 行为 | `docs/astrbot-tools.md` |
 | HTML 渲染、模板、素材目录 | `docs/rendering-assets.md` |
+| Plugin Pages 页面、bridge API 或 WebUI 操作边界 | `docs/plugin-pages-architecture.md`、`docs/plugin-compliance.md` |
 | metadata、schema、logo、requirements、平台声明 | `docs/plugin-compliance.md` |
 
 ## 大文件限制

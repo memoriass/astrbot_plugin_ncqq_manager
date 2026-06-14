@@ -16,6 +16,7 @@
 | `_conf_schema.json` | 使用 AstrBot 支持的 `string`、`bool`、`int` 类型；多面板列表以 JSON 文本方式配置。 |
 | `logo.png` | 根目录正式插件图标，保持 1:1 透明 PNG。 |
 | `requirements.txt` | 声明运行时外部依赖。 |
+| `pages/` | 可选。当前提供 `ncqq-dashboard/index.html`，用于 WebUI 多面板看板和审批。 |
 | `skills/` | 可选。仅在需要随插件提供 LLM 知识或提示词时新增；不把 `docs/*.md` 作为 Skill 来源。 |
 | 日志入口 | 插件模块统一使用 `astrbot.api.logger`。 |
 | 大文件限制 | Python、Markdown、JSON、YAML、HTML 文件均低于 500 行。 |
@@ -23,13 +24,13 @@
 
 ## Plugin Pages 边界
 
-Plugin Pages 适合提供独立 WebUI，例如多面板连通性测试、实例总览、审批队列和健康看板。简单配置继续使用 `_conf_schema.json`；只有当页面交互能明显降低管理复杂度时，才新增 `pages/<page>/index.html`。
+Plugin Pages 用于独立 WebUI。当前页面只覆盖多面板只读看板和审批批准/拒绝；简单配置继续使用 `_conf_schema.json`。
 
 ## 结构约定
 
 - 插件入口层保持在根目录：`main.py`、`__init__.py`、`metadata.yaml`、`_conf_schema.json`、`logo.png`。
 - 运行代码按 `core/`、`tools/`、`workflows/`、`rendering/` 分层。
-- 若后续新增 Plugin Pages，页面资源放入 `pages/`，并单独补充页面架构说明。
+- Plugin Pages 页面资源放入 `pages/`，后端 API 放入 `tools/page_api.py`，并同步 `docs/plugin-pages-architecture.md`。
 - 若后续新增插件 Skill，资源放入 `skills/`，并说明它与 `@llm_tool` 的调用边界。
 - 面向后续模型接手的说明放在 `docs/architecture.md`、`docs/module-map.md` 和按架构功能命名的文档中，代码内只保留必要短注释或 docstring。
 - 根目录保留唯一 `README.md`。

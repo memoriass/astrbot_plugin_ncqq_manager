@@ -22,8 +22,9 @@
 | `workflows/` | 面向聊天侧的业务 workflow 编排，只暴露明确 workflow ID。 |
 | `rendering/` | HTML 模板转图片能力。 |
 | `templates/` | HTML 渲染模板。 |
+| `pages/` | AstrBot Plugin Pages 静态资源，当前提供多面板看板和审批入口。 |
 
-`main.py` 只连接 AstrBot 生命周期和入口；业务选择走 `workflows`，底层服务走 `core`，图文输出走 `rendering`。
+`main.py` 只连接 AstrBot 生命周期和入口；业务选择走 `workflows`，底层服务走 `core`，图文输出走 `rendering`，WebUI 页面走 `pages` 和 `tools/page_api.py`。
 
 ## 多 Manager 模型
 
@@ -103,6 +104,7 @@
 - `docs/approval-model.md` 说明审批边界和群内审批处理。
 - `docs/operation-flows.md` 说明核心操作流程图。
 - `docs/rendering-assets.md` 说明渲染和资产。
+- `docs/plugin-pages-architecture.md` 说明 AstrBot WebUI 页面和 Page API 边界。
 - `docs/workflows.md` 是 workflow 文档入口。
 - `docs/plugin-compliance.md` 记录 AstrBot 插件结构与发布合规检查。
 - `docs/maintenance-policy.md` 记录修改边界、文档同步和大文件限制。

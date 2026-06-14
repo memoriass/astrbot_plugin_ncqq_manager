@@ -1,0 +1,248 @@
+from __future__ import annotations
+
+import asyncio
+import time
+from typing import Any
+
+from astrbot.api import logger
+from astrbot.api.web import error_response, json_response, request
+
+from ..core.approval import claim_approval, list_approvals
+from ..workflows.access import _list_backend_endpoints
+from ..workflows.common import _container_name, _is_running, _list_containers, _manager_get
+
+PLUGIN_ROUTE_PREFIX = "/astrbot_plugin_ncqq_manager"
+
+
+class PageApiMixin:
+    def register_page_apis(self) -> None:
+        self.context.register_web_api(
+            f"{PLUGIN_ROUTE_PREFIX}/dashboard/summary",
+            self.page_dashboard_summary,
+            ["GET"],
+            "ncqq dashboard summary",
+        )
+        self.context.register_web_api(
+            f"{PLUGIN_ROUTE_PREFIX}/approvals/<approval_id>/approve",
+            self.page_approval_approve,
+            ["POST"],
+            "approve ncqq pending approval",
+        )
+        self.context.register_web_api(
+            f"{PLUGIN_ROUTE_PREFIX}/approvals/<approval_id>/reject",
+            self.page_approval_reject,
+            ["POST"],
+            "reject ncqq pending approval",
+        )
+
+    async def page_dashboard_summary(self):
+        managers = await asyncio.gather(
+            *(self._page_manager_summary(manager_id) for manager_id in self.manager_ids())
+        )
+        data = {
+            "generated_at": time.time(),
+            "default_manager": self.default_manager_id(),
+            "managers": list(managers),
+            "approvals": await self._page_approvals(),
+            "bindings": await self._page_bindings(),
+            "health_snapshot": await self._page_health_snapshot(),
+        }
+        return json_response(data)
+
+    async def page_approval_approve(self, approval_id: str):
+        aid = str(approval_id or "").strip().upper()
+        if not aid:
+            return error_response("missing approval_id", status_code=400)
+        record = await claim_approval(self, aid)
+        if not record:
+            return error_response("approval not found or expired", status_code=404)
+        result = await self._dispatch_approved_action(record["action"], record["params"])
+        logger.info("Dashboard approved ncqq approval %s by %s", aid, _page_username())
+        return json_response(
+            {
+                "approval_id": aid,
+                "status": "approved",
+                "description": record.get("description", ""),
+                "result": result,
+            }
+        )
+
+    async def page_approval_reject(self, approval_id: str):
+        aid = str(approval_id or "").strip().upper()
+        if not aid:
+            return error_response("missing approval_id", status_code=400)
+        payload = await request.json(default={})
+        reason = str(payload.get("reason") or "").strip() if isinstance(payload, dict) else ""
+        record = await claim_approval(self, aid)
+        if not record:
+            return error_response("approval not found or expired", status_code=404)
+        logger.info("Dashboard rejected ncqq approval %s by %s", aid, _page_username())
+        return json_response(
+            {
+                "approval_id": aid,
+                "status": "rejected",
+                "description": record.get("description", ""),
+                "reason": reason,
+            }
+        )
+
+    async def _page_manager_summary(self, manager_id: str) -> dict[str, Any]:
+        profile = self.clients.profile(manager_id)
+        health_task = _manager_get(self, "/api/health", manager_id)
+        bots_task = _manager_get(self, "/api/bots", manager_id)
+        containers_task = _list_containers(self, manager_id)
+        endpoints_task = _list_backend_endpoints(self, manager_id)
+        health, bots, containers, endpoints = await asyncio.gather(
+            health_task,
+            bots_task,
+            containers_task,
+            endpoints_task,
+            return_exceptions=True,
+        )
+        return {
+            "id": manager_id,
+            "name": profile.name,
+            "url": profile.manager_url,
+            "is_default": manager_id == self.default_manager_id(),
+            "health": _page_health(health),
+            "bots": _page_bots(bots),
+            "instances": _page_instances(containers),
+            "backends": _page_backends(endpoints),
+        }
+
+    async def _page_approvals(self) -> list[dict[str, Any]]:
+        now = time.time()
+        items: list[dict[str, Any]] = []
+        for record in await list_approvals(self):
+            params = record.get("params") if isinstance(record.get("params"), dict) else {}
+            items.append(
+                {
+                    "approval_id": str(record.get("approval_id") or ""),
+                    "action": str(record.get("action") or ""),
+                    "description": str(record.get("description") or ""),
+                    "requester_qq": str(record.get("requester_qq") or ""),
+                    "group_id": str(record.get("group_id") or ""),
+                    "created_at": float(record.get("created_at") or 0),
+                    "age_seconds": max(0, int(now - float(record.get("created_at") or 0))),
+                    "manager_id": str(params.get("manager_id") or ""),
+                    "instance_name": str(params.get("instance_name") or ""),
+                    "backend_alias": str(params.get("backend_alias") or params.get("alias") or ""),
+                }
+            )
+        return items
+
+    async def _page_bindings(self) -> list[dict[str, Any]]:
+        mapping = await self.get_user_mapping()
+        if not isinstance(mapping, dict):
+            return []
+        items: list[dict[str, Any]] = []
+        for qq, data in sorted(mapping.items(), key=lambda pair: str(pair[0])):
+            if not isinstance(data, dict):
+                continue
+            instances = data.get("instances") if isinstance(data.get("instances"), list) else []
+            items.append(
+                {
+                    "qq": str(qq),
+                    "nickname": str(data.get("nickname") or ""),
+                    "instances": [str(item) for item in instances],
+                }
+            )
+        return items
+
+    async def _page_health_snapshot(self) -> list[dict[str, Any]]:
+        snapshot = await self.get_kv_data("health_snapshot", {})
+        if not isinstance(snapshot, dict):
+            return []
+        items: list[dict[str, Any]] = []
+        for ref, online in sorted(snapshot.items(), key=lambda pair: str(pair[0])):
+            text = str(ref)
+            if "/" in text:
+                manager_id, instance_name = text.split("/", 1)
+            else:
+                manager_id, instance_name = self.default_manager_id(), text
+            items.append(
+                {
+                    "ref": text,
+                    "manager_id": manager_id,
+                    "instance_name": instance_name,
+                    "online": bool(online),
+                }
+            )
+        return items
+
+
+def _page_username() -> str:
+    return str(getattr(request, "username", "") or "-")
+
+
+def _page_health(result: Any) -> dict[str, Any]:
+    if isinstance(result, Exception):
+        return {"ok": False, "status": "error", "error": str(result)}
+    ok, payload = result
+    if not ok or not isinstance(payload, dict):
+        return {"ok": False, "status": "error", "error": str(payload)}
+    state_engine = payload.get("state_engine") if isinstance(payload.get("state_engine"), dict) else {}
+    reasons = payload.get("degraded_reasons") if isinstance(payload.get("degraded_reasons"), list) else []
+    return {
+        "ok": str(payload.get("status") or "").lower() in {"ok", "healthy", "running", "degraded"},
+        "status": str(payload.get("status") or "-"),
+        "docker": bool(payload.get("docker")),
+        "async_docker": bool(payload.get("async_docker")),
+        "state_engine": bool(state_engine.get("running")),
+        "degraded_reasons": [str(item) for item in reasons],
+        "uptime": payload.get("uptime"),
+    }
+
+
+def _page_bots(result: Any) -> dict[str, Any]:
+    if isinstance(result, Exception):
+        return {"ok": False, "total": 0, "online": 0, "error": str(result)}
+    ok, payload = result
+    if not ok or not isinstance(payload, list):
+        return {"ok": False, "total": 0, "online": 0, "error": str(payload)}
+    online = sum(1 for item in payload if isinstance(item, dict) and item.get("connected"))
+    return {"ok": True, "total": len(payload), "online": online}
+
+
+def _page_instances(result: Any) -> dict[str, Any]:
+    if isinstance(result, Exception):
+        return {"ok": False, "items": [], "error": str(result), "running": 0, "total": 0}
+    ok, containers, error = result
+    if not ok:
+        return {"ok": False, "items": [], "error": error, "running": 0, "total": 0}
+    items = [_page_instance(item) for item in containers]
+    return {
+        "ok": True,
+        "items": items,
+        "running": sum(1 for item in items if item["running"]),
+        "total": len(items),
+    }
+
+
+def _page_instance(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": _container_name(item) or "-",
+        "status": str(item.get("status") or item.get("state") or "-"),
+        "running": _is_running(item),
+        "bot_online": bool(item.get("bot_online")),
+        "uin": str(item.get("bot_uin") or item.get("uin") or ""),
+        "image": str(item.get("image") or ""),
+    }
+
+
+def _page_backends(result: Any) -> dict[str, Any]:
+    if isinstance(result, Exception):
+        return {"ok": False, "items": [], "error": str(result), "total": 0}
+    ok, endpoints, error = result
+    if not ok:
+        return {"ok": False, "items": [], "error": error, "total": 0}
+    items = [
+        {
+            "alias": str(item.get("alias") or "-"),
+            "url": str(item.get("url") or "-"),
+            "has_token": bool(item.get("token")),
+        }
+        for item in endpoints
+        if isinstance(item, dict)
+    ]
+    return {"ok": True, "items": items, "total": len(items)}

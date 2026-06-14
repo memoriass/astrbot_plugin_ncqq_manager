@@ -24,11 +24,12 @@
 
 ## 管理员处理方式
 
-管理员可用三种方式处理审批：
+管理员可用以下方式处理审批：
 
 - 直接回复审批 ID：`批准 ABC123`、`拒绝 ABC123`
 - 引用机器人发出的审批消息：只回复 `批准` 或 `拒绝`
 - 通过 Astr 入口：`review_approvals approve ABC123`
+- 通过 AstrBot WebUI 的 `ncqq-dashboard` Page：点击批准或拒绝。
 
 审批回复只识别明确的开头命令：
 
@@ -73,3 +74,4 @@ flowchart TD
 - 审批执行函数不得读取当前聊天上下文推断 manager 或实例。
 - 审批描述可以面向人类展示，但执行只能依赖结构化参数。
 - 拒绝审批不执行远端请求，只移除审批记录并返回说明。
+- WebUI Page 审批与群聊审批使用同一套 `claim_approval()` 和 `_dispatch_approved_action()`。

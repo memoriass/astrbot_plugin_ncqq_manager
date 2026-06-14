@@ -17,6 +17,7 @@ from .tools.admin import AdminToolsMixin
 from .tools.approval_shortcuts import ApprovalShortcutMixin
 from .tools.backend import BackendToolsMixin
 from .tools.instance import InstanceToolsMixin
+from .tools.page_api import PageApiMixin
 from .workflows import run_ncqq_workflow, workflow_from_cli, workflow_from_tool
 
 
@@ -33,6 +34,7 @@ class NCQQManagerPlugin(
     BackendToolsMixin,
     AdminToolsMixin,
     ApprovalShortcutMixin,
+    PageApiMixin,
 ):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -44,6 +46,7 @@ class NCQQManagerPlugin(
         bg_dir = data_dir / "backgrounds"
         bg_dir.mkdir(parents=True, exist_ok=True)
         set_bg_dir(bg_dir)
+        self.register_page_apis()
         self._health_cron_job = None
 
     async def initialize(self):
