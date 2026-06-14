@@ -19,35 +19,71 @@
       {
         id: "local",
         name: "本地面板",
-        url: "http://127.0.0.1:8080",
         is_default: true,
-        health: {
-          ok: true,
-          status: "ok",
-          docker: true,
-          async_docker: true,
-          state_engine: true,
-          degraded_reasons: [],
-        },
-        bots: { ok: true, total: 3, online: 2 },
+        health: { ok: true, status: "ok", docker: true, state_engine: true, degraded_reasons: [] },
+        bots: { ok: true, total: 5, online: 3 },
         instances: {
           ok: true,
-          running: 2,
-          total: 3,
+          running: 4,
+          online: 3,
+          total: 5,
           items: [
-            { name: "alpha", status: "running", running: true, bot_online: true, uin: "10001" },
-            { name: "beta", status: "running", running: true, bot_online: false, uin: "" },
-            { name: "gamma", status: "exited", running: false, bot_online: false, uin: "" },
+            {
+              name: "baka9",
+              display_name: "baka9",
+              status: "running",
+              running: true,
+              bot_online: true,
+              uin: "315000754",
+              avatar: "https://q1.qlogo.cn/g?b=qq&nk=315000754&s=100",
+              login_stage: "logged_in",
+              login_method: "sdk_ws",
+              heartbeat_ts: Date.now() / 1000 - 60,
+            },
+            {
+              name: "698076448",
+              display_name: "698076448",
+              status: "running",
+              running: true,
+              bot_online: true,
+              uin: "171000139",
+              avatar: "https://q1.qlogo.cn/g?b=qq&nk=171000139&s=100",
+              login_stage: "logged_in",
+            },
+            {
+              name: "788952021",
+              display_name: "788952021",
+              status: "exited",
+              running: false,
+              bot_online: false,
+              uin: "",
+              avatar: "",
+              login_stage: "offline",
+            },
+            {
+              name: "1154121306",
+              display_name: "1154121306",
+              status: "exited",
+              running: false,
+              bot_online: false,
+              uin: "",
+              avatar: "",
+              login_stage: "offline",
+            },
+            {
+              name: "miya",
+              display_name: "miya",
+              status: "running",
+              running: true,
+              bot_online: false,
+              uin: "240000846",
+              avatar: "https://q1.qlogo.cn/g?b=qq&nk=240000846&s=100",
+              login_stage: "offline",
+              heartbeat_ts: Date.now() / 1000 - 5400,
+            },
           ],
         },
-        backends: {
-          ok: true,
-          total: 2,
-          items: [
-            { alias: "astrbot", url: "ws://127.0.0.1/ws", has_token: true },
-            { alias: "cloud", url: "wss://example.com/ws", has_token: false },
-          ],
-        },
+        backends: { ok: true, total: 2, items: [{ alias: "astrbot" }, { alias: "cloud" }] },
       },
     ],
     approvals: [
@@ -63,12 +99,8 @@
       },
     ],
     bindings: [
-      { qq: "123456", nickname: "Alice", instances: ["local/alpha", "cloud/demo"] },
-      { qq: "654321", nickname: "", instances: ["local/beta"] },
-    ],
-    health_snapshot: [
-      { ref: "local/alpha", online: true },
-      { ref: "local/beta", online: false },
+      { qq: "123456", nickname: "Alice", instances: ["local/baka9", "cloud/demo"] },
+      { qq: "654321", nickname: "", instances: ["local/miya"] },
     ],
   };
 
@@ -90,17 +122,30 @@
     const value = Number(seconds || 0);
     if (value < 60) return `${value}s`;
     if (value < 3600) return `${Math.floor(value / 60)}m`;
-    return `${Math.floor(value / 3600)}h ${Math.floor((value % 3600) / 60)}m`;
+    return `${Math.floor(value / 3600)}h`;
   }
 
-  function statusClass(ok, warn) {
-    if (!ok) return "bad";
-    return warn ? "warn" : "ok";
+  function maskQQ(value) {
+    const text = String(value || "").trim();
+    if (text.length < 7) return text || "-";
+    return `${text.slice(0, 3)}****${text.slice(-3)}`;
   }
 
-  function statusLabel(ok, warn) {
-    if (!ok) return "FAIL";
-    return warn ? "WARN" : "OK";
+  function loginLabel(item) {
+    const stageMap = {
+      logged_in: "登录成功",
+      qr_waiting: "待扫码",
+      offline: "离线",
+      initializing: "初始化",
+    };
+    if (item.bot_online) return "登录成功";
+    return stageMap[item.login_stage] || (item.running ? "未登录" : "离线");
+  }
+
+  function instanceState(item) {
+    if (item.bot_online) return { key: "online", text: "在线" };
+    if (item.running) return { key: "warn", text: "心跳丢失" };
+    return { key: "offline", text: "离线" };
   }
 
   async function initBridge() {
@@ -135,24 +180,21 @@
     renderManagers(data.managers || []);
     renderApprovals(data.approvals || []);
     renderBindings(data.bindings || []);
-    if (bridge) {
-      els.contextLine.textContent = `更新 ${fmtTime(data.generated_at)}`;
-    }
+    if (bridge) els.contextLine.textContent = `更新 ${fmtTime(data.generated_at)}`;
   }
 
   function renderKpis(data) {
     const managers = data.managers || [];
     const approvals = data.approvals || [];
-    const managerCount = managers.length;
     const running = managers.reduce((sum, item) => sum + Number(item.instances?.running || 0), 0);
     const total = managers.reduce((sum, item) => sum + Number(item.instances?.total || 0), 0);
-    const online = managers.reduce((sum, item) => sum + Number(item.bots?.online || 0), 0);
-    const botTotal = managers.reduce((sum, item) => sum + Number(item.bots?.total || 0), 0);
+    const online = managers.reduce((sum, item) => sum + Number(item.instances?.online || 0), 0);
+    const backendTotal = managers.reduce((sum, item) => sum + Number(item.backends?.total || 0), 0);
     els.kpis.innerHTML = [
-      kpi("Manager", managerCount),
-      kpi("实例", `${running}/${total}`),
-      kpi("Bot", `${online}/${botTotal}`),
-      kpi("审批", approvals.length),
+      kpi("实例在线", `${online}/${total}`),
+      kpi("容器运行", `${running}/${total}`),
+      kpi("后端端点", backendTotal),
+      kpi("待审批", approvals.length),
     ].join("");
   }
 
@@ -165,70 +207,56 @@
       els.managers.innerHTML = empty("暂无 Manager");
       return;
     }
-    els.managers.innerHTML = managers.map(renderManager).join("");
+    els.managers.innerHTML = managers.map(renderManagerSection).join("");
   }
 
-  function renderManager(manager) {
+  function renderManagerSection(manager) {
+    const instances = manager.instances || {};
     const health = manager.health || {};
-    const inst = manager.instances || {};
-    const backends = manager.backends || {};
+    const items = instances.items || [];
     const warn = Boolean((health.degraded_reasons || []).length);
+    const state = health.ok ? (warn ? "warn" : "online") : "offline";
     return `
-      <article class="manager-card">
-        <div class="manager-head">
+      <section class="manager-section">
+        <div class="manager-title">
           <div>
-            <h3>${escapeHtml(manager.name || manager.id)}</h3>
+            <h2>${escapeHtml(manager.name || manager.id)}</h2>
             <p>${escapeHtml(manager.id)}${manager.is_default ? " · default" : ""}</p>
           </div>
-          <span class="pill ${statusClass(health.ok, warn)}">${statusLabel(health.ok, warn)}</span>
+          <div class="manager-meta">
+            <span class="status-chip ${state}">${escapeHtml(health.status || "-")}</span>
+            <span>实例 ${escapeHtml(`${instances.online || 0}/${instances.total || 0}`)}</span>
+            <span>后端 ${escapeHtml(manager.backends?.total || 0)}</span>
+          </div>
         </div>
-        <div class="metric-row">
-          <span>Docker ${health.docker ? "on" : "off"}</span>
-          <span>Engine ${health.state_engine ? "on" : "off"}</span>
-          <span>Bot ${escapeHtml(`${manager.bots?.online || 0}/${manager.bots?.total || 0}`)}</span>
-          <span>后端 ${escapeHtml(backends.total || 0)}</span>
-        </div>
-        <div class="subhead">实例</div>
-        <div class="rows">${renderInstances(inst)}</div>
-        <div class="subhead">后端</div>
-        <div class="rows">${renderBackends(backends)}</div>
-      </article>
+        ${instances.ok ? `<div class="instance-grid">${items.map((item) => renderInstanceCard(item, manager)).join("")}</div>` : empty(instances.error || "实例读取失败", true)}
+      </section>
     `;
   }
 
-  function renderInstances(instances) {
-    if (!instances.ok) return `<div class="empty error">${escapeHtml(instances.error || "读取失败")}</div>`;
-    const items = instances.items || [];
-    if (!items.length) return empty("暂无实例");
-    return items
-      .map(
-        (item) => `
-        <div class="data-row">
-          <span class="dot ${item.running ? "ok" : "bad"}"></span>
-          <strong>${escapeHtml(item.name)}</strong>
-          <span>${escapeHtml(item.status)}</span>
-          <span>${item.bot_online ? "online" : "offline"}${item.uin ? ` · ${escapeHtml(item.uin)}` : ""}</span>
+  function renderInstanceCard(item, manager) {
+    const state = instanceState(item);
+    const avatar = String(item.avatar || "").trim();
+    const bgStyle = avatar ? ` style="background-image:url('${escapeHtml(avatar)}')"` : "";
+    return `
+      <article class="instance-card ${state.key}">
+        <div class="avatar-pane${avatar ? "" : " empty-avatar"}"${bgStyle}>
+          ${avatar ? `<img src="${escapeHtml(avatar)}" alt="" loading="lazy" onerror="this.remove()" />` : "<span>OFF</span>"}
         </div>
-      `,
-      )
-      .join("");
-  }
-
-  function renderBackends(backends) {
-    if (!backends.ok) return `<div class="empty error">${escapeHtml(backends.error || "读取失败")}</div>`;
-    const items = backends.items || [];
-    if (!items.length) return empty("暂无后端");
-    return items
-      .map(
-        (item) => `
-        <div class="data-row">
-          <span class="dot ${item.has_token ? "ok" : "warn"}"></span>
-          <strong>${escapeHtml(item.alias)}</strong>
-          <span>${escapeHtml(item.url)}</span>
+        <div class="instance-main">
+          <div class="instance-head">
+            <h3>${escapeHtml(item.display_name || item.name)}</h3>
+            <span class="status-chip ${state.key}">${escapeHtml(state.text)}</span>
+          </div>
+          <p>QQ: ${escapeHtml(maskQQ(item.uin))}</p>
+          <div class="instance-facts">
+            <span>${escapeHtml(loginLabel(item))}</span>
+            <span>${escapeHtml(item.status || "-")}</span>
+            <span>${escapeHtml(manager.id)}/${escapeHtml(item.name)}</span>
+          </div>
         </div>
-      `,
-      )
-      .join("");
+      </article>
+    `;
   }
 
   function renderApprovals(approvals) {
@@ -273,8 +301,8 @@
       .join("");
   }
 
-  function empty(text) {
-    return `<div class="empty">${escapeHtml(text)}</div>`;
+  function empty(text, error) {
+    return `<div class="empty${error ? " error" : ""}">${escapeHtml(text)}</div>`;
   }
 
   async function handleApproval(action, approvalId) {

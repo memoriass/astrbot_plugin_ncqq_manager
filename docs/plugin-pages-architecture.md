@@ -27,6 +27,7 @@ Page 端调用 bridge 时不写插件名前缀，例如 `bridge.apiGet("dashboar
 ## 数据边界
 
 - manager 信息只返回 ID、名称、URL 和状态，不返回 API key。
+- 实例卡片数据来自目标 manager 的 `/api/containers` 和 `/api/bots`，包括昵称、UIN、头像、登录阶段、心跳和容器状态。
 - 后端端点只返回 alias、URL 和 token 是否存在，不返回 token 明文。
 - 审批列表不返回原始 `params`，只返回页面展示所需的 manager、实例、后端别名和描述。
 - 绑定关系只读展示，不在页面修改。

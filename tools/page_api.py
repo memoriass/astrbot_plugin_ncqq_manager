@@ -99,6 +99,7 @@ class PageApiMixin:
             endpoints_task,
             return_exceptions=True,
         )
+        bot_lookup = _page_bot_lookup(bots)
         return {
             "id": manager_id,
             "name": profile.name,
@@ -106,7 +107,7 @@ class PageApiMixin:
             "is_default": manager_id == self.default_manager_id(),
             "health": _page_health(health),
             "bots": _page_bots(bots),
-            "instances": _page_instances(containers),
+            "instances": _page_instances(containers, bot_lookup, profile.manager_url),
             "backends": _page_backends(endpoints),
         }
 
@@ -204,30 +205,86 @@ def _page_bots(result: Any) -> dict[str, Any]:
     return {"ok": True, "total": len(payload), "online": online}
 
 
-def _page_instances(result: Any) -> dict[str, Any]:
+def _page_bot_lookup(result: Any) -> dict[str, dict[str, Any]]:
+    if isinstance(result, Exception):
+        return {}
+    ok, payload = result
+    if not ok or not isinstance(payload, list):
+        return {}
+    lookup: dict[str, dict[str, Any]] = {}
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        for key in (
+            item.get("name"),
+            item.get("container_name"),
+            item.get("uin"),
+            item.get("bot_uin"),
+        ):
+            text = str(key or "").strip().lstrip("/")
+            if text and text not in lookup:
+                lookup[text] = item
+    return lookup
+
+
+def _page_instances(
+    result: Any,
+    bots: dict[str, dict[str, Any]],
+    manager_url: str,
+) -> dict[str, Any]:
     if isinstance(result, Exception):
         return {"ok": False, "items": [], "error": str(result), "running": 0, "total": 0}
     ok, containers, error = result
     if not ok:
         return {"ok": False, "items": [], "error": error, "running": 0, "total": 0}
-    items = [_page_instance(item) for item in containers]
+    items = [_page_instance(item, bots, manager_url) for item in containers]
     return {
         "ok": True,
         "items": items,
         "running": sum(1 for item in items if item["running"]),
+        "online": sum(1 for item in items if item["bot_online"]),
         "total": len(items),
     }
 
 
-def _page_instance(item: dict[str, Any]) -> dict[str, Any]:
+def _page_instance(
+    item: dict[str, Any],
+    bots: dict[str, dict[str, Any]],
+    manager_url: str,
+) -> dict[str, Any]:
+    name = _container_name(item) or "-"
+    uin = str(item.get("bot_uin") or item.get("uin") or "").strip()
+    bot = bots.get(name) or bots.get(uin) or {}
+    avatar = str(item.get("bot_avatar") or bot.get("avatar") or bot.get("bot_avatar") or "").strip()
     return {
-        "name": _container_name(item) or "-",
+        "name": name,
+        "display_name": str(
+            item.get("bot_nickname")
+            or item.get("nickname")
+            or bot.get("nickname")
+            or bot.get("name")
+            or name
+        ),
         "status": str(item.get("status") or item.get("state") or "-"),
         "running": _is_running(item),
-        "bot_online": bool(item.get("bot_online")),
-        "uin": str(item.get("bot_uin") or item.get("uin") or ""),
+        "bot_online": bool(item.get("bot_online") or bot.get("connected")),
+        "uin": uin or str(bot.get("uin") or bot.get("bot_uin") or ""),
+        "avatar": _page_absolute_url(avatar, manager_url),
+        "login_stage": str(item.get("login_stage") or ""),
+        "login_method": str(item.get("login_method") or ""),
+        "heartbeat_ts": item.get("bot_heartbeat_ts") or bot.get("last_seen"),
         "image": str(item.get("image") or ""),
     }
+
+
+def _page_absolute_url(value: str, base_url: str) -> str:
+    if not value:
+        return ""
+    if value.startswith(("http://", "https://", "data:")):
+        return value
+    if value.startswith("/") and base_url:
+        return base_url.rstrip("/") + value
+    return value
 
 
 def _page_backends(result: Any) -> dict[str, Any]:
