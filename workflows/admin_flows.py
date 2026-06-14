@@ -26,14 +26,15 @@ async def _run_check_health(
     event: AstrMessageEvent,
     request: WorkflowRequest,
 ) -> AsyncIterator[Any]:
+    manager_id = request.manager_id
     results = await asyncio.gather(
-        _manager_get(plugin, "/api/health"),
-        _manager_get(plugin, "/api/botshepherd/status"),
-        _manager_get(plugin, "/api/botshepherd/activation"),
-        _manager_get(plugin, "/api/botshepherd/bots/heartbeat"),
-        _manager_get(plugin, "/api/bots"),
-        _list_containers(plugin),
-        _list_backend_endpoints(plugin),
+        _manager_get(plugin, "/api/health", manager_id),
+        _manager_get(plugin, "/api/botshepherd/status", manager_id),
+        _manager_get(plugin, "/api/botshepherd/activation", manager_id),
+        _manager_get(plugin, "/api/botshepherd/bots/heartbeat", manager_id),
+        _manager_get(plugin, "/api/bots", manager_id),
+        _list_containers(plugin, manager_id),
+        _list_backend_endpoints(plugin, manager_id),
         return_exceptions=True,
     )
 
@@ -84,8 +85,9 @@ async def _run_check_health(
 async def _run_check_manager(
     plugin: Any,
     event: AstrMessageEvent,
+    manager_id: str = "",
 ) -> AsyncIterator[Any]:
-    ok, payload = await _manager_get(plugin, "/api/health")
+    ok, payload = await _manager_get(plugin, "/api/health", manager_id)
     if not ok or not isinstance(payload, dict):
         yield event.plain_result(f"管理器健康检查失败：{payload}")
         return
@@ -95,10 +97,13 @@ async def _run_check_manager(
 async def _run_check_botshepherd(
     plugin: Any,
     event: AstrMessageEvent,
+    manager_id: str = "",
 ) -> AsyncIterator[Any]:
-    ok_status, status = await _manager_get(plugin, "/api/botshepherd/status")
-    ok_activation, activation = await _manager_get(plugin, "/api/botshepherd/activation")
-    ok_heartbeat, heartbeat = await _manager_get(plugin, "/api/botshepherd/bots/heartbeat")
+    ok_status, status = await _manager_get(plugin, "/api/botshepherd/status", manager_id)
+    ok_activation, activation = await _manager_get(plugin, "/api/botshepherd/activation", manager_id)
+    ok_heartbeat, heartbeat = await _manager_get(
+        plugin, "/api/botshepherd/bots/heartbeat", manager_id
+    )
     if not ok_status or not isinstance(status, dict):
         yield event.plain_result(f"BotShepherd 状态读取失败：{status}")
         return
@@ -114,8 +119,9 @@ async def _run_check_botshepherd(
 async def _run_check_bot_runtime(
     plugin: Any,
     event: AstrMessageEvent,
+    manager_id: str = "",
 ) -> AsyncIterator[Any]:
-    ok, payload = await _manager_get(plugin, "/api/bots")
+    ok, payload = await _manager_get(plugin, "/api/bots", manager_id)
     if not ok or not isinstance(payload, list):
         yield event.plain_result(f"Bot 运行态读取失败：{payload}")
         return
@@ -131,8 +137,15 @@ async def _run_read_bot_messages(
     if not target:
         yield event.plain_result("read_bot_messages 需要目标 Bot/实例名。")
         return
+    try:
+        request.manager_id, target = plugin.split_instance_ref(target, request.manager_id)
+    except KeyError:
+        yield event.plain_result(f"未知 ncqq-manager 面板。可用：{', '.join(plugin.manager_ids())}")
+        return
     limit = _as_int(request.params.get("limit"), default=20, maximum=50)
-    ok, payload = await _manager_get(plugin, f"/api/bots/{target}/messages?limit={limit}")
+    ok, payload = await _manager_get(
+        plugin, f"/api/bots/{target}/messages?limit={limit}", request.manager_id
+    )
     if not ok or not isinstance(payload, dict):
         yield event.plain_result(f"最近消息读取失败：{payload}")
         return
@@ -145,7 +158,9 @@ async def _run_audit_operations(
     request: WorkflowRequest,
 ) -> AsyncIterator[Any]:
     limit = _as_int(request.params.get("limit"), default=10, maximum=50)
-    ok, payload = await _manager_get(plugin, f"/api/operation_logs?limit={limit}")
+    ok, payload = await _manager_get(
+        plugin, f"/api/operation_logs?limit={limit}", request.manager_id
+    )
     if not ok or not isinstance(payload, dict):
         yield event.plain_result(f"操作审计读取失败：{payload}")
         return
@@ -155,8 +170,9 @@ async def _run_audit_operations(
 async def _run_inspect_resources(
     plugin: Any,
     event: AstrMessageEvent,
+    manager_id: str = "",
 ) -> AsyncIterator[Any]:
-    async for item in plugin.ncqq_query(event, query="assets"):
+    async for item in plugin.ncqq_query(event, query="assets", manager_id=manager_id):
         yield item
 
 
@@ -178,6 +194,7 @@ async def _run_read_instance_config(
         event,
         query="files",
         instance_names=instance_name,
+        manager_id=request.manager_id,
         path=path,
     ):
         yield item
@@ -186,6 +203,7 @@ async def _run_read_instance_config(
             event,
             query="config",
             instance_names=instance_name,
+            manager_id=request.manager_id,
             file_name=file_name,
         ):
             yield item

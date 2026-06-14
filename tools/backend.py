@@ -1,5 +1,3 @@
-import re
-
 from astrbot.api.all import AstrMessageEvent
 
 from ..core.actions import do_inject_by_alias
@@ -14,6 +12,7 @@ class BackendToolsMixin:
         action: str,
         alias: str = "",
         instance_names: str = "",
+        manager_id: str = "",
     ):
         """Inject an existing backend endpoint into one or more ncqq instances.
 
@@ -23,12 +22,19 @@ class BackendToolsMixin:
         """
         sender_id = str(event.get_sender_id())
         is_admin = self.is_plugin_admin(event)
+        selected_manager, targets, target_error = self._resolve_tool_targets(
+            instance_names, manager_id
+        )
+        if target_error:
+            yield event.plain_result(target_error)
+            return
+        client = self.client_for_manager(selected_manager)
 
         if action != "inject":
             yield event.plain_result("不支持的后端操作。connect_backend workflow 仅允许 inject。")
             return
 
-        endpoints = await do_get_radar_endpoints(self.client)
+        endpoints = await do_get_radar_endpoints(client)
         matched = next(
             (item for item in endpoints if alias.lower() in item.get("alias", "").lower()),
             None,
@@ -38,13 +44,12 @@ class BackendToolsMixin:
             return
         resolved_alias = matched["alias"]
 
-        targets = [n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()]
         if not targets:
             yield event.plain_result("后端接入流程需要明确目标实例。")
             return
 
         if not is_admin:
-            allowed = await self.get_allowed_instances(sender_id)
+            allowed = await self.get_allowed_instances(sender_id, selected_manager)
             bad = [name for name in targets if name not in allowed]
             if bad:
                 yield event.plain_result(
@@ -56,7 +61,11 @@ class BackendToolsMixin:
                 aid = await create_approval(
                     self,
                     action="inject_backend",
-                    params={"alias": resolved_alias, "instance_name": name},
+                    params={
+                        "alias": resolved_alias,
+                        "manager_id": selected_manager,
+                        "instance_name": name,
+                    },
                     requester_qq=sender_id,
                     group_id=str(event.get_group_id() or ""),
                     description=f"接入后端 {resolved_alias} -> 实例 {name}（申请者: {sender_id}）",
@@ -68,7 +77,7 @@ class BackendToolsMixin:
         results: list[str] = []
         for name in targets:
             _, msg = await do_inject_by_alias(
-                self.client,
+                client,
                 alias=resolved_alias,
                 target="bs",
                 conn_id=name,

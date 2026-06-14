@@ -1,4 +1,4 @@
-- current=ncqq workflow-only refactor
+- current=multi ncqq-manager panel support
 - fact=chat entrypoints now accept only explicit workflow IDs
 - workflows=create_instance,relogin_instance,control_instance,connect_backend,check_health,check_instance,list_instances,check_backends,delete_instance,review_approvals
 - health_public_entry=check_health; use detail/details for manager/BotShepherd/Bot runtime drilldown
@@ -10,6 +10,10 @@
 - group_whitelist=enable_group_whitelist + response_groups; limits group entrypoints only, private chat remains available
 - health_legacy_ids=check_manager/check_botshepherd/check_bot_runtime map to check_health details
 - runtime_structure=core/tools/workflows/rendering
+- multi_manager=manager_profiles JSON config + default_manager fallback; instance refs use manager/instance
+- manager_selection=LLM params manager/manager_id/panel/site or target manager/instance
+- approval_scope=create/delete/inject_backend store manager_id and execute on selected panel
+- health_scope=periodic health check iterates all configured manager panels
 - workflow_split=workflows/dispatcher.py plus models/parsing/common/formatters/access/instance_flows/admin_flows
 - main_workflows=manage_instance/query/manage_backend/review_approvals; detailed workflows remain directly callable but hidden from default list
 - architecture_docs=docs/architecture.md, docs/module-map.md, docs/core-services.md, docs/astrbot-tools.md, docs/workflow-engine.md, docs/rendering-assets.md
@@ -20,4 +24,4 @@
 - gitignore=ignore Python caches/logs/local virtualenvs; tracked Python bytecode removed from archive
 - synced_remote_hotfix=llm_tool docstring type labels and _conf_schema bool/int types
 - removed=legacy command aliases, scope-based inspect routing, legacy approval actions, unused helper functions
-- next=reload AstrBot plugin and run one real create_instance/relogin_instance smoke test
+- next=reload AstrBot plugin and run one real multi-manager query/control smoke test

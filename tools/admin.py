@@ -107,6 +107,9 @@ class AdminToolsMixin:
             return f"暂不支持处理该审批类型：{action}。请联系管理员检查配置。"
         try:
             return await handler(params)
+        except KeyError as exc:
+            missing = str(exc.args[0]) if exc.args else "unknown"
+            return f"审批目标 ncqq-manager 面板不存在或参数缺失：{missing}。请检查配置。"
         except Exception:
             return "审批执行过程中出现异常，请稍后重试或检查后台日志。"
 
@@ -114,6 +117,8 @@ class AdminToolsMixin:
 
     async def _handle_create_instance_flow(self, params: dict) -> str:
         inst_name = params["instance_name"]
+        manager_id = self.normalize_manager_id(params.get("manager_id", ""))
+        client = self.client_for_manager(manager_id)
         backend_alias = str(params.get("backend_alias") or "").strip()
         bind_qq = str(params.get("bind_qq") or "").strip()
         nickname = str(params.get("nickname") or "").strip()
@@ -121,7 +126,7 @@ class AdminToolsMixin:
         results: list[str] = []
         exists = False
         try:
-            payload = await self.client.make_request("GET", "/api/containers")
+            payload = await client.make_request("GET", "/api/containers")
             containers = payload.get("containers", []) if isinstance(payload, dict) else []
             exists = any(
                 str(item.get("name") or "").strip().lstrip("/") == inst_name
@@ -135,7 +140,7 @@ class AdminToolsMixin:
         if exists:
             results.append(f"实例 {inst_name} 已存在，跳过创建。")
         else:
-            create_ok, msg = await do_create_instance(self.client, inst_name)
+            create_ok, msg = await do_create_instance(client, inst_name)
             results.append(msg)
 
         if create_ok and bind_qq:
@@ -143,18 +148,19 @@ class AdminToolsMixin:
             if bind_qq not in mapping:
                 mapping[bind_qq] = {"nickname": "", "instances": []}
             instances = mapping[bind_qq].setdefault("instances", [])
-            if inst_name not in instances:
-                instances.append(inst_name)
-                results.append(f"已绑定实例 {inst_name} -> QQ {bind_qq}。")
+            instance_ref = self.format_instance_ref(manager_id, inst_name)
+            if instance_ref not in instances:
+                instances.append(instance_ref)
+                results.append(f"已绑定实例 {instance_ref} -> QQ {bind_qq}。")
             else:
-                results.append(f"实例 {inst_name} 与 QQ {bind_qq} 的绑定已存在。")
+                results.append(f"实例 {instance_ref} 与 QQ {bind_qq} 的绑定已存在。")
             if nickname:
                 mapping[bind_qq]["nickname"] = nickname
             await self.save_user_mapping(mapping)
 
         if create_ok and backend_alias:
             _, msg = await do_inject_by_alias(
-                self.client,
+                client,
                 alias=backend_alias,
                 target="bs",
                 conn_id=inst_name,
@@ -167,25 +173,33 @@ class AdminToolsMixin:
 
     async def _handle_delete(self, params: dict) -> str:
         inst_name = params["instance_name"]
+        manager_id = self.normalize_manager_id(params.get("manager_id", ""))
+        client = self.client_for_manager(manager_id)
         ok, msg = await do_instance_action(
-            self.client, inst_name, "delete", delete_data=params.get("delete_data", False)
+            client, inst_name, "delete", delete_data=params.get("delete_data", False)
         )
         if ok:
             mapping = await self.get_user_mapping()
             changed = False
             for data in mapping.values():
                 insts = data.get("instances", [])
-                if inst_name in insts:
-                    insts.remove(inst_name)
-                    changed = True
+                refs = {self.format_instance_ref(manager_id, inst_name)}
+                if manager_id == self.default_manager_id():
+                    refs.add(inst_name)
+                for ref in refs:
+                    if ref in insts:
+                        insts.remove(ref)
+                        changed = True
             if changed:
                 await self.save_user_mapping(mapping)
-                msg += f"\n已自动解除所有用户与实例 {inst_name} 的绑定。"
+                msg += f"\n已自动解除所有用户与实例 {manager_id}/{inst_name} 的绑定。"
         return msg
 
     async def _handle_inject_backend(self, params: dict) -> str:
+        manager_id = self.normalize_manager_id(params.get("manager_id", ""))
+        client = self.client_for_manager(manager_id)
         _, msg = await do_inject_by_alias(
-            self.client, alias=params["alias"], target="bs", conn_id=params["instance_name"]
+            client, alias=params["alias"], target="bs", conn_id=params["instance_name"]
         )
         return msg
 

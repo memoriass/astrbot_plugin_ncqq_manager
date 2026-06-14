@@ -90,11 +90,22 @@ async def render_alert_card(
         return summary
 
 
-def _find_owners(mapping: dict, instance_name: str) -> list[tuple[str, str]]:
-    """Return [(qq_id, nickname), ...] for owners of instance_name."""
+def _find_owners(
+    plugin: "NCQQManagerPlugin",
+    mapping: dict,
+    manager_id: str,
+    instance_name: str,
+) -> list[tuple[str, str]]:
+    """Return [(qq_id, nickname), ...] for owners of an instance ref."""
     owners = []
+    instance_ref = plugin.format_instance_ref(manager_id, instance_name)
     for qq_id, data in mapping.items():
-        if instance_name in data.get("instances", []):
+        instances = data.get("instances", [])
+        legacy_match = (
+            manager_id == plugin.default_manager_id()
+            and instance_name in instances
+        )
+        if instance_ref in instances or legacy_match:
             owners.append((qq_id, data.get("nickname", "")))
     return owners
 
@@ -106,23 +117,32 @@ async def do_health_check(plugin: "NCQQManagerPlugin") -> None:
 
     notify_group = str(plugin.config.get("notify_group", "")).strip()
 
-    try:
-        # Fetch all instances (admin view)
-        result = await do_list_instances(plugin.client, [], True)
-        if isinstance(result, str):
-            logger.debug("Health check: no instances or error: %s", result)
-            return
-        containers: list[dict] = result
-    except Exception as e:
-        logger.warning("Health check failed to list instances: %s", e)
-        return
-
-    # Build current status snapshot: {name: online_bool}
     current: dict[str, bool] = {}
-    for c in containers:
-        name = c.get("name", "")
-        if name:
-            current[name] = bool(c.get("bot_online", False))
+    instance_meta: dict[str, tuple[str, str]] = {}
+    any_success = False
+    for manager_id in plugin.manager_ids():
+        try:
+            result = await do_list_instances(
+                plugin.client_for_manager(manager_id), [], True
+            )
+            if isinstance(result, str):
+                logger.debug(
+                    "Health check %s: no instances or error: %s", manager_id, result
+                )
+                continue
+            any_success = True
+            for c in result:
+                name = c.get("name", "")
+                if not name:
+                    continue
+                ref = plugin.format_instance_ref(manager_id, name)
+                current[ref] = bool(c.get("bot_online", False))
+                instance_meta[ref] = (manager_id, name)
+        except Exception as e:
+            logger.warning("Health check failed to list instances on %s: %s", manager_id, e)
+
+    if not any_success:
+        return
 
     # Load previous snapshot
     prev: dict[str, bool] = await plugin.get_kv_data("health_snapshot", {})
@@ -153,15 +173,16 @@ async def do_health_check(plugin: "NCQQManagerPlugin") -> None:
         text_lines = ["🔴 以下实例掉线："]
         notified_owners: set[str] = set()
 
-        for name in newly_offline:
-            owners = _find_owners(mapping, name)
+        for ref in newly_offline:
+            manager_id, name = instance_meta.get(ref, plugin.split_instance_ref(ref))
+            owners = _find_owners(plugin, mapping, manager_id, name)
             owner_label = ", ".join(
                 f"{nick or qq}" for qq, nick in owners
             ) if owners else "未绑定"
             items_html_parts.append(
-                _build_alert_item(name, "offline", "已掉线", owner_label)
+                _build_alert_item(ref, "offline", "已掉线", owner_label)
             )
-            text_lines.append(f"  • {name}（归属: {owner_label}）")
+            text_lines.append(f"  • {ref}（归属: {owner_label}）")
 
             # Private notify each owner
             for qq_id, nick in owners:
@@ -171,8 +192,8 @@ async def do_health_check(plugin: "NCQQManagerPlugin") -> None:
                 try:
                     mc = MessageChain()
                     mc.message(
-                        f"⚠️ 你的实例 {name} 已掉线，请及时检查。\n"
-                        f"可发送「ncqq login {name}」查看状态或「ncqq qrcode {name}」重新扫码。"
+                        f"⚠️ 你的实例 {ref} 已掉线，请及时检查。\n"
+                        f"可发送「ncqq login {ref}」查看状态或「ncqq qrcode {ref}」重新扫码。"
                     )
                     await StarTools.send_message_by_id(
                         type="PrivateMessage", id=qq_id, message_chain=mc
@@ -209,15 +230,16 @@ async def do_health_check(plugin: "NCQQManagerPlugin") -> None:
         text_lines = ["🟢 以下实例已恢复："]
         notified_owners: set[str] = set()
 
-        for name in newly_online:
-            owners = _find_owners(mapping, name)
+        for ref in newly_online:
+            manager_id, name = instance_meta.get(ref, plugin.split_instance_ref(ref))
+            owners = _find_owners(plugin, mapping, manager_id, name)
             owner_label = ", ".join(
                 f"{nick or qq}" for qq, nick in owners
             ) if owners else "未绑定"
             items_html_parts.append(
-                _build_alert_item(name, "recover", "已恢复上线", owner_label)
+                _build_alert_item(ref, "recover", "已恢复上线", owner_label)
             )
-            text_lines.append(f"  • {name}（归属: {owner_label}）")
+            text_lines.append(f"  • {ref}（归属: {owner_label}）")
 
             # Private notify each owner
             for qq_id, nick in owners:
@@ -226,7 +248,7 @@ async def do_health_check(plugin: "NCQQManagerPlugin") -> None:
                 notified_owners.add(qq_id)
                 try:
                     mc = MessageChain()
-                    mc.message(f"✅ 你的实例 {name} 已恢复上线。")
+                    mc.message(f"✅ 你的实例 {ref} 已恢复上线。")
                     await StarTools.send_message_by_id(
                         type="PrivateMessage", id=qq_id, message_chain=mc
                     )

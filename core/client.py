@@ -1,7 +1,91 @@
 import json
+from dataclasses import dataclass
+from typing import Any
 
 import aiohttp
 from astrbot.api import logger
+
+
+@dataclass(frozen=True, slots=True)
+class ManagerProfile:
+    id: str
+    name: str
+    manager_url: str
+    api_key: str
+
+    def as_client_config(self) -> dict[str, str]:
+        return {
+            "manager_id": self.id,
+            "manager_name": self.name,
+            "manager_url": self.manager_url,
+            "api_key": self.api_key,
+        }
+
+
+def _clean_manager_id(value: object, default: str = "default") -> str:
+    text = str(value or "").strip().lower()
+    text = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in text)
+    return text.strip("-_") or default
+
+
+def _parse_manager_profiles(config: dict[str, Any]) -> tuple[list[ManagerProfile], str]:
+    raw = config.get("manager_profiles")
+    profiles: list[ManagerProfile] = []
+
+    if isinstance(raw, str) and raw.strip():
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning("manager_profiles 不是合法 JSON，将回退单面板配置。")
+            payload = None
+    else:
+        payload = raw
+
+    if isinstance(payload, dict):
+        items = []
+        for key, value in payload.items():
+            if isinstance(value, dict):
+                item = dict(value)
+                item.setdefault("id", key)
+                items.append(item)
+    elif isinstance(payload, list):
+        items = [item for item in payload if isinstance(item, dict)]
+    else:
+        items = []
+
+    seen: set[str] = set()
+    for index, item in enumerate(items, start=1):
+        manager_id = _clean_manager_id(item.get("id"), default=f"manager-{index}")
+        if manager_id in seen:
+            continue
+        seen.add(manager_id)
+        url = str(item.get("manager_url") or item.get("url") or "").strip().rstrip("/")
+        api_key = str(item.get("api_key") or item.get("key") or "").strip()
+        name = str(item.get("name") or item.get("display_name") or manager_id).strip()
+        profiles.append(ManagerProfile(manager_id, name, url, api_key))
+
+    legacy_url = str(config.get("manager_url") or "").strip().rstrip("/")
+    legacy_key = str(config.get("api_key") or "").strip()
+    legacy_id = _clean_manager_id(config.get("default_manager"), default="default")
+    if legacy_url or legacy_key:
+        if legacy_id not in seen:
+            profiles.insert(
+                0,
+                ManagerProfile(
+                    legacy_id,
+                    str(config.get("manager_name") or legacy_id),
+                    legacy_url,
+                    legacy_key,
+                ),
+            )
+
+    if not profiles:
+        profiles.append(ManagerProfile("default", "default", legacy_url, legacy_key))
+
+    default_id = _clean_manager_id(config.get("default_manager"), default=profiles[0].id)
+    if default_id not in {item.id for item in profiles}:
+        default_id = profiles[0].id
+    return profiles, default_id
 
 
 class NCQQClient:
@@ -144,3 +228,39 @@ class NCQQClient:
             payload.setdefault("event", event_name)
             return payload
         return {"event": event_name, "data": payload}
+
+
+class NCQQClientRegistry:
+    def __init__(self, config: dict[str, Any]):
+        profiles, default_id = _parse_manager_profiles(config)
+        self.profiles: dict[str, ManagerProfile] = {item.id: item for item in profiles}
+        self.default_id = default_id
+        self._clients: dict[str, NCQQClient] = {}
+
+    def normalize_id(self, manager_id: object = "") -> str:
+        cleaned = _clean_manager_id(manager_id, default=self.default_id)
+        if cleaned not in self.profiles:
+            raise KeyError(cleaned)
+        return cleaned
+
+    def get(self, manager_id: object = "") -> NCQQClient:
+        normalized = self.normalize_id(manager_id)
+        client = self._clients.get(normalized)
+        if client is None:
+            client = NCQQClient(self.profiles[normalized].as_client_config())
+            self._clients[normalized] = client
+        return client
+
+    def profile(self, manager_id: object = "") -> ManagerProfile:
+        return self.profiles[self.normalize_id(manager_id)]
+
+    def ids(self) -> list[str]:
+        return list(self.profiles)
+
+    def labels(self) -> list[str]:
+        return [f"{item.id}({item.name})" for item in self.profiles.values()]
+
+    async def close(self) -> None:
+        for client in list(self._clients.values()):
+            await client.close()
+        self._clients.clear()

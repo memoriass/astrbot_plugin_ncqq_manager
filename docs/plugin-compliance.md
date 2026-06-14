@@ -13,12 +13,16 @@
 | `support_platforms` | 已满足 | 声明 `aiocqhttp`，按 OneBot v11 标准消息使用，不考虑 WeChat adapter。 |
 | `main.py` | 已满足 | 插件主类入口，显式导入 AstrBot API；`@register(...)` 的作者、版本、仓库地址与 `metadata.yaml` 对齐。 |
 | `__init__.py` | 已满足 | 导出插件类，保留包入口。 |
-| `_conf_schema.json` | 已满足 | 使用 AstrBot 支持的 `string`、`bool`、`int` 类型。 |
+| `_conf_schema.json` | 已满足 | 使用 AstrBot 支持的 `string`、`bool`、`int` 类型；多面板列表以 JSON 文本方式配置。 |
 | `logo.png` | 已满足 | 已替换为 AstrBot 与 ncqq 看板娘拥抱的扁平动画图标，正式图为官方推荐的 256x256 透明 PNG。 |
 | `requirements.txt` | 已满足 | 声明运行时外部依赖 `aiohttp`。 |
 | 日志入口 | 已满足 | 插件与脚本模块统一使用 `astrbot.api.logger`。 |
 | 大文件拆分 | 已满足 | 所有文本/代码文件均低于 500 行。 |
 | 发布包清洁度 | 已满足 | 已新增 `.gitignore` 并从版本库移除 Python 运行缓存与未使用候选图资产。 |
+
+## Plugin Pages 结论
+
+AstrBot Plugin Pages 适合在第二阶段提供独立 WebUI，例如多面板连通性测试、实例总览、审批队列和健康看板。当前 2.1.0 先把多面板能力落在配置 schema、聊天 workflow 和权限模型里；简单配置仍使用 `_conf_schema.json`，避免同时引入页面前端和权限交互风险。
 
 ## 结构约定
 

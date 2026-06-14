@@ -29,10 +29,11 @@ from .parsing import _first_text, _get_bool, _normalize_action
 async def _run_backend_connect(
     plugin: Any,
     event: AstrMessageEvent,
+    manager_id: str,
     instance_name: str,
     backend_alias: str,
 ) -> AsyncIterator[Any]:
-    resolved_alias, error = await _resolve_backend_alias(plugin, backend_alias)
+    resolved_alias, error = await _resolve_backend_alias(plugin, backend_alias, manager_id)
     if error:
         yield event.plain_result(error)
         return
@@ -41,6 +42,7 @@ async def _run_backend_connect(
         action="inject",
         alias=resolved_alias,
         instance_names=instance_name,
+        manager_id=manager_id,
     ):
         yield item
 
@@ -57,6 +59,8 @@ async def _run_create_instance(
     if not instance_name:
         yield event.plain_result("实例创建流程需要明确新实例名。")
         return
+    manager_id = request.manager_id
+    client = plugin.client_for_manager(manager_id)
 
     backend_alias = _first_text(request.params, "backend_alias", "backend", "backend_name", "alias", "endpoint")
     need_qrcode = _get_bool(request.params, "qrcode", "need_qrcode", default=True)
@@ -66,19 +70,19 @@ async def _run_create_instance(
 
     resolved_backend_alias = ""
     if backend_alias:
-        resolved_backend_alias, error = await _resolve_backend_alias(plugin, backend_alias)
+        resolved_backend_alias, error = await _resolve_backend_alias(plugin, backend_alias, manager_id)
         if error:
             yield event.plain_result(error)
             return
 
-    list_ok, containers, list_error = await _list_containers(plugin)
+    list_ok, containers, list_error = await _list_containers(plugin, manager_id)
     if not list_ok:
         yield event.plain_result(f"实例创建流程停止：无法读取容器列表。{list_error}")
         return
 
     current = _find_container(containers, instance_name)
     if current is not None:
-        allowed, message = await _ensure_instance_access(plugin, event, instance_name)
+        allowed, message = await _ensure_instance_access(plugin, event, instance_name, manager_id)
         if not allowed:
             yield event.plain_result(
                 f"实例 {instance_name} 已存在，但当前账号没有操作权限。{message}"
@@ -92,6 +96,7 @@ async def _run_create_instance(
         if not plugin.is_plugin_admin(event):
             params = {
                 "instance_name": instance_name,
+                "manager_id": manager_id,
                 "backend_alias": resolved_backend_alias,
                 "bind_qq": bind_qq or str(event.get_sender_id()),
                 "nickname": nickname,
@@ -124,18 +129,19 @@ async def _run_create_instance(
             event,
             action="create",
             instance_names=instance_name,
+            manager_id=manager_id,
         ):
             yield item
 
         confirmed, confirm_message = await do_confirm_instance_action(
-            plugin.client,
+            client,
             instance_name,
             ["create", "start"],
             timeout=20,
         )
         yield event.plain_result(confirm_message)
 
-        list_ok, containers, list_error = await _list_containers(plugin)
+        list_ok, containers, list_error = await _list_containers(plugin, manager_id)
         current = _find_container(containers, instance_name) if list_ok else None
         if current is None:
             detail = "" if confirmed else "状态确认尚未完成。"
@@ -146,7 +152,9 @@ async def _run_create_instance(
             return
 
     if bind_qq and plugin.is_plugin_admin(event):
-        bind_message = await _assign_instance_to_user(plugin, bind_qq, instance_name, nickname)
+        bind_message = await _assign_instance_to_user(
+            plugin, bind_qq, manager_id, instance_name, nickname
+        )
         if bind_message:
             yield event.plain_result(bind_message)
 
@@ -156,6 +164,7 @@ async def _run_create_instance(
             event,
             action="start",
             instance_names=instance_name,
+            manager_id=manager_id,
         ):
             yield item
 
@@ -166,15 +175,18 @@ async def _run_create_instance(
         async for item in _run_backend_connect(
             plugin,
             event,
+            manager_id,
             instance_name,
             resolved_backend_alias,
         ):
             yield item
 
-    payload = await do_check_login_status(plugin.client, instance_name)
+    payload = await do_check_login_status(client, instance_name)
     yield event.plain_result(_format_login_status(instance_name, payload))
     if need_qrcode and payload.get("status") != "error" and not payload.get("logged_in"):
-        async for item in plugin.ncqq_qrcode(event, instance_name=instance_name):
+        async for item in plugin.ncqq_qrcode(
+            event, instance_name=instance_name, manager_id=manager_id
+        ):
             yield item
 
 
@@ -190,7 +202,9 @@ async def _run_relogin_instance(
     if not instance_name:
         yield event.plain_result("登录恢复流程需要明确目标实例。")
         return
-    allowed, message = await _ensure_instance_access(plugin, event, instance_name)
+    manager_id = request.manager_id
+    client = plugin.client_for_manager(manager_id)
+    allowed, message = await _ensure_instance_access(plugin, event, instance_name, manager_id)
     if not allowed:
         yield event.plain_result(message)
         return
@@ -201,10 +215,11 @@ async def _run_relogin_instance(
             event,
             action="restart",
             instance_names=instance_name,
+            manager_id=manager_id,
         ):
             yield item
 
-    payload = await do_check_login_status(plugin.client, instance_name)
+    payload = await do_check_login_status(client, instance_name)
     yield event.plain_result(_format_login_status(instance_name, payload))
     if payload.get("status") == "error":
         return
@@ -216,7 +231,9 @@ async def _run_relogin_instance(
     if not need_qrcode and not force_qrcode:
         yield event.plain_result("当前未自动拉取二维码，因为 qrcode=false。")
         return
-    async for item in plugin.ncqq_qrcode(event, instance_name=instance_name):
+    async for item in plugin.ncqq_qrcode(
+        event, instance_name=instance_name, manager_id=manager_id
+    ):
         yield item
 
 
@@ -237,7 +254,9 @@ async def _run_control_instance(
     if not instance_name:
         yield event.plain_result("实例操作流程需要明确目标实例。")
         return
-    allowed, message = await _ensure_instance_access(plugin, event, instance_name)
+    manager_id = request.manager_id
+    client = plugin.client_for_manager(manager_id)
+    allowed, message = await _ensure_instance_access(plugin, event, instance_name, manager_id)
     if not allowed:
         yield event.plain_result(message)
         return
@@ -246,6 +265,7 @@ async def _run_control_instance(
         event,
         action=action,
         instance_names=instance_name,
+        manager_id=manager_id,
     ):
         yield item
 
@@ -256,7 +276,7 @@ async def _run_control_instance(
         default=action in {"start", "restart", "unpause"},
     )
     if check_after:
-        payload = await do_check_login_status(plugin.client, instance_name)
+        payload = await do_check_login_status(client, instance_name)
         yield event.plain_result(_format_login_status(instance_name, payload))
 
 
@@ -266,8 +286,10 @@ async def _run_connect_backend(
     request: WorkflowRequest,
 ) -> AsyncIterator[Any]:
     backend_alias = _first_text(request.params, "backend_alias", "backend", "backend_name", "alias", "endpoint")
+    manager_id = request.manager_id
+    client = plugin.client_for_manager(manager_id)
     if not backend_alias:
-        endpoints = await do_get_radar_endpoints(plugin.client)
+        endpoints = await do_get_radar_endpoints(client)
         yield event.plain_result(
             "后端接入流程需要 backend_alias。当前可用：" + _format_backend_aliases(endpoints)
         )
@@ -280,16 +302,17 @@ async def _run_connect_backend(
     if not instance_name:
         yield event.plain_result("后端接入流程需要明确目标实例。")
         return
-    allowed, message = await _ensure_instance_access(plugin, event, instance_name)
+    manager_id = request.manager_id
+    allowed, message = await _ensure_instance_access(plugin, event, instance_name, manager_id)
     if not allowed:
         yield event.plain_result(message)
         return
 
-    resolved_alias, error = await _resolve_backend_alias(plugin, backend_alias)
+    resolved_alias, error = await _resolve_backend_alias(plugin, backend_alias, manager_id)
     if error:
         yield event.plain_result(error)
         return
-    async for item in _run_backend_connect(plugin, event, instance_name, resolved_alias):
+    async for item in _run_backend_connect(plugin, event, manager_id, instance_name, resolved_alias):
         yield item
 
 
@@ -305,8 +328,10 @@ async def _run_check_instance(
     if not instance_name:
         yield event.plain_result("实例诊断流程需要明确目标实例。")
         return
+    manager_id = request.manager_id
+    client = plugin.client_for_manager(manager_id)
 
-    list_ok, containers, list_error = await _list_containers(plugin)
+    list_ok, containers, list_error = await _list_containers(plugin, manager_id)
     if not list_ok:
         yield event.plain_result(f"实例诊断流程停止：无法读取容器列表。{list_error}")
         return
@@ -316,11 +341,15 @@ async def _run_check_instance(
         return
 
     yield event.plain_result("实例诊断流程：\n" + _format_container_brief(current))
-    payload = await do_check_login_status(plugin.client, instance_name)
+    payload = await do_check_login_status(client, instance_name)
     yield event.plain_result(_format_login_status(instance_name, payload))
-    async for item in plugin.ncqq_query(event, query="monitor", instance_names=instance_name):
+    async for item in plugin.ncqq_query(
+        event, query="monitor", instance_names=instance_name, manager_id=manager_id
+    ):
         yield item
-    async for item in plugin.ncqq_query(event, query="logs", instance_names=instance_name):
+    async for item in plugin.ncqq_query(
+        event, query="logs", instance_names=instance_name, manager_id=manager_id
+    ):
         yield item
 
     file_name = _first_text(request.params, "file_name", "config_file")
@@ -330,6 +359,7 @@ async def _run_check_instance(
             event,
             query="files",
             instance_names=instance_name,
+            manager_id=manager_id,
             path=path,
         ):
             yield item
@@ -338,6 +368,7 @@ async def _run_check_instance(
             event,
             query="config",
             instance_names=instance_name,
+            manager_id=manager_id,
             file_name=file_name,
         ):
             yield item
@@ -354,7 +385,8 @@ async def _run_delete_instance(
     if not instance_name:
         yield event.plain_result("实例销毁流程需要明确目标实例。")
         return
-    allowed, message = await _ensure_instance_access(plugin, event, instance_name)
+    manager_id = request.manager_id
+    allowed, message = await _ensure_instance_access(plugin, event, instance_name, manager_id)
     if not allowed:
         yield event.plain_result(message)
         return
@@ -370,5 +402,6 @@ async def _run_delete_instance(
         action="delete",
         instance_names=instance_name,
         delete_data=delete_data,
+        manager_id=manager_id,
     ):
         yield item

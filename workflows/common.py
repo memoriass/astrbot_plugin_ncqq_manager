@@ -5,15 +5,15 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-async def _manager_get(plugin: Any, endpoint: str) -> tuple[bool, Any]:
+async def _manager_get(plugin: Any, endpoint: str, manager_id: str = "") -> tuple[bool, Any]:
     try:
-        return True, await plugin.client.make_request("GET", endpoint)
+        return True, await plugin.client_for_manager(manager_id).make_request("GET", endpoint)
     except Exception as exc:
         return False, str(exc)
 
 
-async def _list_containers(plugin: Any) -> tuple[bool, list[dict[str, Any]], str]:
-    ok, payload = await _manager_get(plugin, "/api/containers")
+async def _list_containers(plugin: Any, manager_id: str = "") -> tuple[bool, list[dict[str, Any]], str]:
+    ok, payload = await _manager_get(plugin, "/api/containers", manager_id)
     if not ok:
         return False, [], str(payload)
     if isinstance(payload, dict):

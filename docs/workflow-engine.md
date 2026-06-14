@@ -2,6 +2,8 @@
 
 `workflows` 是 LLM 和 `/ncqq` 的业务编排层。聊天侧优先使用主 workflow，细分 workflow 保留直接调用能力。
 
+所有 workflow request 都携带可选 `manager_id`。解析层接受 `manager`、`manager_id`、`panel`、`site` 参数；访问层同时支持 `manager/instance` 目标写法。
+
 | 文件 | 职责 |
 | --- | --- |
 | `workflows/__init__.py` | 对外导出稳定 workflow API。 |
@@ -22,6 +24,13 @@
 | `query` | `scope=instances/backends/health/instance/messages/audit/resources/config` | 查询类主入口。 |
 | `manage_backend` | `intent=list/check/connect` | 后端端点主入口。 |
 | `review_approvals` | `action=list/approve/reject` | 审批主入口。 |
+
+## 多面板约定
+
+- 进入具体实例流程前必须经过 `workflows/access.py` 的目标解析。
+- 任何读取 `/api/...` 的 helper 都要接收 `manager_id` 并调用 `client_for_manager()`。
+- 审批参数必须保存 `manager_id`，批准执行时不可回退到默认面板。
+- 用户绑定、权限校验和健康快照统一使用 `manager/instance`。
 
 新增 workflow 顺序：
 

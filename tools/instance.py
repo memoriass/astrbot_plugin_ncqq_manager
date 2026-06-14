@@ -32,11 +32,39 @@ class InstanceToolsMixin:
         "delete":  ["destroy", "die"],
     }
 
+    def _resolve_tool_targets(
+        self,
+        instance_names: str,
+        manager_id: str = "",
+    ) -> tuple[str, list[str], str]:
+        try:
+            selected_manager = self.normalize_manager_id(manager_id)
+        except KeyError:
+            return "", [], f"未知 ncqq-manager 面板：{manager_id}。可用：{', '.join(self.manager_ids())}"
+
+        targets: list[str] = []
+        explicit_manager = bool(str(manager_id or "").strip())
+        for raw in re.split(r"[,，、\s]+", instance_names) if str(instance_names).strip() else []:
+            if not raw.strip():
+                continue
+            try:
+                item_manager, item_name = self.split_instance_ref(raw, selected_manager)
+            except KeyError:
+                return "", [], f"未知 ncqq-manager 面板。可用：{', '.join(self.manager_ids())}"
+            if item_manager != selected_manager:
+                if explicit_manager or targets:
+                    return "", [], "一次工具调用暂不支持跨 ncqq-manager 面板批量操作，请按面板拆分。"
+                selected_manager = item_manager
+            if item_name:
+                targets.append(item_name)
+        return selected_manager, targets, ""
+
     async def ncqq_query(
         self,
         event: AstrMessageEvent,
         query: str,
         instance_names: str = "",
+        manager_id: str = "",
         file_name: str = "onebot11_uin.json",
         path: str = "",
     ):
@@ -55,20 +83,28 @@ class InstanceToolsMixin:
                 "config"    — 读取实例容器内的配置文件内容（仅管理员）。
                 "files"     — 列出实例数据目录下的文件与子目录（仅管理员）。
             instance_names (string): 实例名，login/monitor/logs/config/files 时必填；支持逗号分隔多个（login 支持批量）。
+            manager_id (string): 目标 ncqq-manager 面板 ID；也可在实例名中使用 manager/instance。
             file_name (string): 仅 query=config 时有效，容器内目标文件名，默认 onebot11_uin.json。
             path (string): 仅 query=files 时有效，相对于实例数据根目录的路径，留空表示根目录。
         """
         sender_id = str(event.get_sender_id())
         is_admin = self.is_plugin_admin(event)
+        selected_manager, names, target_error = self._resolve_tool_targets(
+            instance_names, manager_id
+        )
+        if target_error:
+            yield event.plain_result(target_error)
+            return
+        client = self.client_for_manager(selected_manager)
 
         # --- instances ---
         if query == "instances":
-            allowed = await self.get_allowed_instances(sender_id)
-            result = await do_list_instances(self.client, allowed, is_admin)
+            allowed = await self.get_allowed_instances(sender_id, selected_manager)
+            result = await do_list_instances(client, allowed, is_admin)
             if isinstance(result, str):
                 yield event.plain_result(result)
                 return
-            base_url = self.client.config.get("manager_url", "").rstrip("/")
+            base_url = client.config.get("manager_url", "").rstrip("/")
             for inst in result:
                 if inst.get("bot_avatar") and inst["bot_avatar"].startswith("/"):
                     inst["bot_avatar"] = f"{base_url}{inst['bot_avatar']}"
@@ -88,19 +124,18 @@ class InstanceToolsMixin:
 
         # --- login ---
         if query == "login":
-            names = [n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()]
             if not names:
                 yield event.plain_result("请补充实例名（instance_names）。")
                 return
             if not is_admin:
-                allowed = await self.get_allowed_instances(sender_id)
+                allowed = await self.get_allowed_instances(sender_id, selected_manager)
                 bad = [n for n in names if n not in allowed]
                 if bad:
                     yield event.plain_result(f"无权查看以下实例：{'、'.join(bad)}。")
                     return
             lines: list[str] = []
             for name in names:
-                p = await do_check_login_status(self.client, name)
+                p = await do_check_login_status(client, name)
                 if p.get("status") == "error":
                     lines.append(f"• {name}：⚠️ 获取失败，请稍后重试")
                 elif p.get("logged_in"):
@@ -119,10 +154,12 @@ class InstanceToolsMixin:
                 yield event.plain_result("监控与日志查询仅限管理员。")
                 return
             name = instance_names.strip()
+            if names:
+                name = names[0]
             if not name:
                 yield event.plain_result("请补充实例名（instance_names）。")
                 return
-            yield event.plain_result(await do_get_monitor(self.client, name, fetch_logs=(query == "logs")))
+            yield event.plain_result(await do_get_monitor(client, name, fetch_logs=(query == "logs")))
             return
 
         # --- assets ---
@@ -130,7 +167,7 @@ class InstanceToolsMixin:
             if not is_admin:
                 yield event.plain_result("资产查询仅限管理员。")
                 return
-            yield event.plain_result(await do_list_assets(self.client))
+            yield event.plain_result(await do_list_assets(client))
             return
 
         # --- config ---
@@ -139,10 +176,12 @@ class InstanceToolsMixin:
                 yield event.plain_result("配置读取仅限管理员。")
                 return
             name = instance_names.strip()
+            if names:
+                name = names[0]
             if not name:
                 yield event.plain_result("请补充实例名（instance_names）。")
                 return
-            yield event.plain_result(await do_read_config(self.client, name, file_name))
+            yield event.plain_result(await do_read_config(client, name, file_name))
             return
 
         # --- files ---
@@ -151,10 +190,12 @@ class InstanceToolsMixin:
                 yield event.plain_result("文件目录查询仅限管理员。")
                 return
             name = instance_names.strip()
+            if names:
+                name = names[0]
             if not name:
                 yield event.plain_result("请补充实例名（instance_names）。")
                 return
-            yield event.plain_result(await do_list_files(self.client, name, path))
+            yield event.plain_result(await do_list_files(client, name, path))
             return
 
         yield event.plain_result(
@@ -167,6 +208,7 @@ class InstanceToolsMixin:
         action: str,
         instance_names: str = "",
         delete_data: bool = False,
+        manager_id: str = "",
     ):
         """对 ncqq 实例执行创建、销毁和生命周期控制。
 
@@ -185,11 +227,18 @@ class InstanceToolsMixin:
                 "create"       — 创建新实例，仅管理员直接执行。
             instance_names (string): 目标实例名，支持逗号分隔多个（create/start/stop 等均支持批量）。
             delete_data (boolean): 仅 action=delete 时有效。true 时同时删除本地数据目录（QQ数据/配置/插件/缓存，不可恢复）；false 时仅移除容器保留数据。用户说"彻底删除""删干净"时为 true，仅说"删除"时为 false。
+            manager_id (string): 目标 ncqq-manager 面板 ID；也可在实例名中使用 manager/instance。
         """
         sender_id = str(event.get_sender_id())
         is_admin = self.is_plugin_admin(event)
 
-        names = [n.strip() for n in re.split(r"[,，、\s]+", instance_names) if n.strip()]
+        selected_manager, names, target_error = self._resolve_tool_targets(
+            instance_names, manager_id
+        )
+        if target_error:
+            yield event.plain_result(target_error)
+            return
+        client = self.client_for_manager(selected_manager)
 
         # ── create ──────────────────────────────────────────────────────────
         if action == "create":
@@ -201,7 +250,7 @@ class InstanceToolsMixin:
                 return
             results: list[str] = []
             for n in names:
-                ok, msg = await do_create_instance(self.client, n)
+                ok, msg = await do_create_instance(client, n)
                 results.append(msg)
             yield event.plain_result("\n".join(results))
             return
@@ -220,7 +269,7 @@ class InstanceToolsMixin:
 
         if action == "delete":
             if not is_admin:
-                allowed = await self.get_allowed_instances(sender_id)
+                allowed = await self.get_allowed_instances(sender_id, selected_manager)
                 bad = [n for n in names if n not in allowed]
                 if bad:
                     yield event.plain_result(f"以下实例不在你的可操作范围内：{'、'.join(bad)}。如需删除请联系管理员。")
@@ -230,7 +279,11 @@ class InstanceToolsMixin:
                     aid = await create_approval(
                         self,
                         action="delete",
-                        params={"instance_name": n, "delete_data": delete_data},
+                        params={
+                            "instance_name": n,
+                            "manager_id": selected_manager,
+                            "delete_data": delete_data,
+                        },
                         requester_qq=sender_id,
                         group_id=str(event.get_group_id() or ""),
                         description=f"销毁实例 {n}{'（含本地数据）' if delete_data else ''}（申请者: {sender_id}）",
@@ -242,9 +295,11 @@ class InstanceToolsMixin:
             results = []
             cleaned: list[str] = []
             for n in names:
-                ok, msg = await do_instance_action(self.client, n, "delete", delete_data=delete_data)
+                ok, msg = await do_instance_action(client, n, "delete", delete_data=delete_data)
                 if ok:
-                    _, confirm = await do_confirm_instance_action(self.client, n, self._ACTION_EVENT_MAP["delete"])
+                    _, confirm = await do_confirm_instance_action(
+                        client, n, self._ACTION_EVENT_MAP["delete"]
+                    )
                     msg = f"{msg}\n{confirm}"
                     cleaned.append(n)
                 results.append(msg)
@@ -254,9 +309,13 @@ class InstanceToolsMixin:
                 for data in mapping.values():
                     for inst in cleaned:
                         lst = data.get("instances", [])
-                        if inst in lst:
-                            lst.remove(inst)
-                            changed = True
+                        refs = {self.format_instance_ref(selected_manager, inst)}
+                        if selected_manager == self.default_manager_id():
+                            refs.add(inst)
+                        for ref in refs:
+                            if ref in lst:
+                                lst.remove(ref)
+                                changed = True
                 if changed:
                     await self.save_user_mapping(mapping)
                     results.append(f"已自动解除所有用户与实例 {'、'.join(cleaned)} 的绑定。")
@@ -265,7 +324,7 @@ class InstanceToolsMixin:
 
         # Non-destructive lifecycle
         if not is_admin:
-            allowed = await self.get_allowed_instances(sender_id)
+            allowed = await self.get_allowed_instances(sender_id, selected_manager)
             bad = [n for n in names if n not in allowed]
             if bad:
                 yield event.plain_result(f"以下实例不在你的可操作范围内：{'、'.join(bad)}。请联系管理员完成绑定。")
@@ -273,14 +332,21 @@ class InstanceToolsMixin:
 
         results = []
         for n in names:
-            ok, msg = await do_instance_action(self.client, n, action)
+            ok, msg = await do_instance_action(client, n, action)
             if ok:
-                _, confirm = await do_confirm_instance_action(self.client, n, self._ACTION_EVENT_MAP.get(action, [action]))
+                _, confirm = await do_confirm_instance_action(
+                    client, n, self._ACTION_EVENT_MAP.get(action, [action])
+                )
                 msg = f"{msg}\n{confirm}"
             results.append(msg)
         yield event.plain_result("\n".join(results))
 
-    async def ncqq_qrcode(self, event: AstrMessageEvent, instance_name: str):
+    async def ncqq_qrcode(
+        self,
+        event: AstrMessageEvent,
+        instance_name: str,
+        manager_id: str = "",
+    ):
         """获取指定 ncqq 实例的登录二维码图片。
 
         当用户说"获取二维码""拉码""扫码登录""帮我拉个码"等含"二维码/扫码/登录码"关键词时调用。
@@ -290,22 +356,32 @@ class InstanceToolsMixin:
 
         Args:
             instance_name (string): 目标 ncqq 实例名，必须明确提供。
+            manager_id (string): 目标 ncqq-manager 面板 ID；也可在实例名中使用 manager/instance。
         """
         sender_id = str(event.get_sender_id())
         is_admin = self.is_plugin_admin(event)
-        name = instance_name.strip()
+        selected_manager, names, target_error = self._resolve_tool_targets(
+            instance_name, manager_id
+        )
+        if target_error:
+            yield event.plain_result(target_error)
+            return
+        name = names[0] if names else ""
+        client = self.client_for_manager(selected_manager)
 
         if not name:
             yield event.plain_result("请提供实例名（instance_name）。")
             return
 
         if not is_admin:
-            allowed = await self.get_allowed_instances(sender_id)
+            allowed = await self.get_allowed_instances(sender_id, selected_manager)
             if name not in allowed:
-                yield event.plain_result(f"实例 {name} 不在你的可操作范围内，请确认实例名或联系管理员。")
+                yield event.plain_result(
+                    f"实例 {selected_manager}/{name} 不在你的可操作范围内，请确认实例名或联系管理员。"
+                )
                 return
 
-        results = await do_get_qrcode(self.client, name)
+        results = await do_get_qrcode(client, name)
 
         # 判断是否需要私聊发送（群聊触发 + 配置开启）
         is_group = bool(event.get_group_id())

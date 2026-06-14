@@ -35,6 +35,10 @@
   schema types now use `bool` / `int`.
 - Reorganized runtime code into `core/`, `tools/`, `workflows/`, and
   `rendering/`.
+- Added multi ncqq-manager panel support through `manager_profiles`,
+  `default_manager`, manager-scoped clients, and `manager/instance` refs.
+- Updated workflows, tools, approvals, permissions, and periodic health checks
+  to execute against the selected manager panel.
 - Added main workflow routing for chat usage: `manage_instance`, `query`, and
   `manage_backend`; detailed workflows remain directly callable as internal
   targets.

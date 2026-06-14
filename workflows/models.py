@@ -9,6 +9,7 @@ from typing import Any
 class WorkflowRequest:
     workflow: str
     target: str = ""
+    manager_id: str = ""
     params: dict[str, Any] = field(default_factory=dict)
     source: str = "tool"
 

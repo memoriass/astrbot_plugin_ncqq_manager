@@ -15,6 +15,21 @@ def _split_words(value: str) -> list[str]:
     return [part for part in str(value or "").split() if part]
 
 
+def _split_cli_args(value: str) -> tuple[list[str], dict[str, Any]]:
+    parts = _split_words(value)
+    params: dict[str, Any] = {}
+    positional: list[str] = []
+    for token in parts:
+        if "=" not in token:
+            positional.append(token)
+            continue
+        key, raw = token.split("=", 1)
+        key = key.strip()
+        if key:
+            params[key] = raw.strip()
+    return positional, params
+
+
 def _normalize_workflow(value: str) -> str:
     return _canonical_key(value)
 
@@ -67,6 +82,10 @@ def _first_text(params: dict[str, Any], *keys: str) -> str:
     return ""
 
 
+def _manager_text(params: dict[str, Any]) -> str:
+    return _first_text(params, "manager_id", "manager", "panel", "site")
+
+
 def _get_bool(params: dict[str, Any], *keys: str, default: bool = False) -> bool:
     for key in keys:
         if key not in params:
@@ -101,6 +120,7 @@ def workflow_from_tool(
     return WorkflowRequest(
         workflow=selected,
         target=resolved_target,
+        manager_id=_manager_text(payload),
         params=payload,
         source="tool",
     )
@@ -113,8 +133,7 @@ def workflow_from_cli(sub: str, args: str = "") -> WorkflowRequest | None:
         return None
 
     args = str(args or "").strip()
-    parts = _split_words(args)
-    params: dict[str, Any] = {}
+    parts, params = _split_cli_args(args)
     target = ""
 
     if workflow == "manage_instance":
@@ -133,12 +152,17 @@ def workflow_from_cli(sub: str, args: str = "") -> WorkflowRequest | None:
     elif workflow == "query":
         params["scope"] = parts[0] if parts else ""
         target = parts[1] if len(parts) > 1 else ""
-        if _canonical_key(str(params["scope"])) in {"messages", "message", "消息"}:
+        scope_key = _canonical_key(str(params["scope"]))
+        if scope_key in {"health", "manager", "botshepherd", "runtime", "健康"}:
+            lowered = {p.lower() for p in parts[1:]}
+            params["details"] = bool(lowered & {"detail", "details", "verbose", "详细", "详情"})
+            target = ""
+        elif scope_key in {"messages", "message", "消息"}:
             params["limit"] = parts[2] if len(parts) > 2 else "20"
-        elif _canonical_key(str(params["scope"])) in {"audit", "operations", "审计"}:
+        elif scope_key in {"audit", "operations", "审计"}:
             params["limit"] = parts[1] if len(parts) > 1 else "10"
             target = ""
-        elif _canonical_key(str(params["scope"])) in {"config", "files", "配置", "文件"}:
+        elif scope_key in {"config", "files", "配置", "文件"}:
             params["file_name"] = parts[2] if len(parts) > 2 else ""
             params["path"] = parts[3] if len(parts) > 3 else ""
     elif workflow == "manage_backend":
@@ -152,7 +176,7 @@ def workflow_from_cli(sub: str, args: str = "") -> WorkflowRequest | None:
             params["backend_alias"] = parts[1]
         params["qrcode"] = True
     elif workflow == "relogin_instance":
-        target = args
+        target = " ".join(parts)
     elif workflow == "control_instance":
         params["action"] = _normalize_action(parts[0] if parts else "")
         target = " ".join(parts[1:]) if len(parts) > 1 else ""
@@ -195,4 +219,10 @@ def workflow_from_cli(sub: str, args: str = "") -> WorkflowRequest | None:
         params["approval_id"] = parts[1].upper() if len(parts) > 1 else ""
         params["reason"] = " ".join(parts[2:]) if len(parts) > 2 else ""
 
-    return WorkflowRequest(workflow=workflow, target=target, params=params, source="cli")
+    return WorkflowRequest(
+        workflow=workflow,
+        target=target,
+        manager_id=_manager_text(params),
+        params=params,
+        source="cli",
+    )

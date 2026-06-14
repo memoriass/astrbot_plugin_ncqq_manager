@@ -193,6 +193,14 @@ async def run_ncqq_workflow(
     if spec is None:
         yield event.plain_result("未知 ncqq workflow。\n" + _format_workflow_list())
         return
+    if str(request.manager_id or "").strip():
+        try:
+            request.manager_id = plugin.normalize_manager_id(request.manager_id)
+        except KeyError:
+            yield event.plain_result(
+                f"未知 ncqq-manager 面板：{request.manager_id}。可用：{', '.join(plugin.manager_ids())}"
+            )
+            return
 
     if spec.admin_only and not plugin.is_plugin_admin(event):
         yield event.plain_result(f"{spec.title} 仅限 AstrBot 管理员使用。")
@@ -224,12 +232,14 @@ async def run_ncqq_workflow(
         return
 
     if request.workflow == "list_instances":
-        async for item in plugin.ncqq_query(event, query="instances"):
+        async for item in plugin.ncqq_query(
+            event, query="instances", manager_id=request.manager_id
+        ):
             yield item
         return
 
     if request.workflow == "check_backends":
-        endpoints = await do_get_radar_endpoints(plugin.client)
+        endpoints = await do_get_radar_endpoints(plugin.client_for_manager(request.manager_id))
         yield event.plain_result(_format_backend_list(endpoints))
         return
 
@@ -239,17 +249,17 @@ async def run_ncqq_workflow(
         return
 
     if request.workflow == "check_manager":
-        async for item in _run_check_manager(plugin, event):
+        async for item in _run_check_manager(plugin, event, request.manager_id):
             yield item
         return
 
     if request.workflow == "check_botshepherd":
-        async for item in _run_check_botshepherd(plugin, event):
+        async for item in _run_check_botshepherd(plugin, event, request.manager_id):
             yield item
         return
 
     if request.workflow == "check_bot_runtime":
-        async for item in _run_check_bot_runtime(plugin, event):
+        async for item in _run_check_bot_runtime(plugin, event, request.manager_id):
             yield item
         return
 
@@ -264,7 +274,7 @@ async def run_ncqq_workflow(
         return
 
     if request.workflow == "inspect_resources":
-        async for item in _run_inspect_resources(plugin, event):
+        async for item in _run_inspect_resources(plugin, event, request.manager_id):
             yield item
         return
 

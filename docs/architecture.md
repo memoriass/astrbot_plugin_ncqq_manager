@@ -25,6 +25,19 @@
 
 `main.py` 只连接 AstrBot 生命周期和入口；业务选择走 `workflows`，底层服务走 `core`，图文输出走 `rendering`。
 
+## 多 Manager 模型
+
+插件从 2.1.0 开始支持多个 ncqq-manager 面板。旧的 `manager_url` / `api_key` 仍作为单面板配置使用；新增 `manager_profiles` JSON 文本后，每个面板以稳定 `manager_id` 管理独立 HTTP session。
+
+命名规则：
+
+- 面板 ID 只保留字母、数字、`-`、`_`，其他字符会规范化。
+- 未显式指定时使用 `default_manager`。
+- 绑定关系使用 `manager/instance` 存储，旧的纯实例名绑定只在默认面板继续兼容。
+- 聊天目标可以直接写成 `cloud/mybot`，也可以在参数里写 `manager=cloud`。
+
+多面板只表示多个 ncqq-manager 控制面板；BotShepherd/radar endpoint 仍属于各自面板内部的后端端点，不与 manager 概念混用。
+
 ## Workflow 层
 
 聊天侧只暴露 workflow，不直接暴露底层 API 包装。当前优先使用主 workflow：`manage_instance`、`query`、`manage_backend`、`review_approvals`；细分 workflow 仍可直接调用，并作为主流程内部路由目标。
@@ -86,3 +99,5 @@
 - `docs/plugin-compliance.md` 记录 AstrBot 插件结构与发布合规检查。
 - `docs/current/overview.md` 和 `docs/current/task.md` 是当前改造状态摘要。
 - `HANDOFF.zh-CN.md` 是跨会话交接记录。
+
+本地接入测试、评审计划、临时分析记录放在根目录 `local-docs/`，该目录进入 `.gitignore`，不随正式版本归档。需要长期保留给后续模型接手的内容，应整理进上述功能命名文档，而不是提交临时记录。

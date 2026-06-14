@@ -9,6 +9,18 @@
         "type": "string",
         "description": "管理器的 API Key"
     },
+    "default_manager": {
+        "title": "默认管理器 ID",
+        "type": "string",
+        "description": "多 ncqq-manager 面板配置时的默认面板 ID。未配置多面板时，旧 manager_url/api_key 会作为该 ID 对应的面板。",
+        "default": "default"
+    },
+    "manager_profiles": {
+        "title": "多管理器配置 JSON",
+        "type": "string",
+        "description": "可选。JSON 数组，每项包含 id、name、manager_url、api_key。用于同时管理本地和云端 ncqq-manager 面板。留空时使用上方单面板配置。",
+        "default": ""
+    },
     "qrcode_private": {
         "title": "二维码私聊发送",
         "type": "bool",

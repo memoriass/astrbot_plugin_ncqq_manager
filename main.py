@@ -10,7 +10,7 @@ from astrbot.core.star.register import register_star as register
 from astrbot.core.star.star_tools import StarTools
 
 from .core.approval import claim_approval
-from .core.client import NCQQClient
+from .core.client import NCQQClientRegistry
 from .core.health_check import do_health_check
 from .rendering.html_renderer import cleanup_renderer, set_bg_dir
 from .tools.admin import AdminToolsMixin
@@ -24,7 +24,7 @@ from .workflows import run_ncqq_workflow, workflow_from_cli, workflow_from_tool
     "ncqq_manager",
     "memoriass",
     "NapCatQQ 容器控制与后端路由插件",
-    "2.0.4",
+    "2.1.0",
     "https://github.com/memoriass/astrbot_plugin_ncqq_manager",
 )
 class NCQQManagerPlugin(
@@ -37,7 +37,8 @@ class NCQQManagerPlugin(
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
         self.config = config
-        self.client = NCQQClient(self.config)
+        self.clients = NCQQClientRegistry(self.config)
+        self.client = self.clients.get()
         # plugin data 目录（AstrBot 标准持久化路径）
         data_dir = pathlib.Path(StarTools.get_data_dir("astrbot_plugin_ncqq_manager"))
         bg_dir = data_dir / "backgrounds"
@@ -89,7 +90,7 @@ class NCQQManagerPlugin(
                 await self.context.cron_manager.delete_job(self._health_cron_job.job_id)
             except Exception:
                 pass
-        await self.client.close()
+        await self.clients.close()
         await cleanup_renderer()
 
     # ------------------------------------------------------------------
@@ -129,8 +130,10 @@ class NCQQManagerPlugin(
             workflow(string): One workflow scenario id from the list above.
             target(string): Target instance name when the scenario works on one instance.
                 When omitted and the user has exactly one bound instance, the
-                plugin resolves it automatically.
+                plugin resolves it automatically. Multi-manager targets may be
+                written as "manager/instance".
             params(object): Optional JSON object. Common fields:
+                {"manager":"cloud"} selects a non-default ncqq-manager panel.
                 manage_instance: {"intent":"control","action":"restart"}
                 query: {"scope":"health","details":true}
                 manage_backend: {"intent":"connect","backend_alias":"alias"}
@@ -168,6 +171,7 @@ class NCQQManagerPlugin(
         "ncqq read_instance_config <实例> [文件] [路径] - 配置读取流程，管理员限定\n"
         "ncqq delete_instance <实例> confirm [data] - 销毁流程；data 表示同时删数据\n"
         "ncqq review_approvals [approve|reject <ID>] - 审批队列流程"
+        "\n任意命令可追加 manager=<面板ID>，目标也可写成 <面板ID>/<实例名>。"
     )
 
     def _is_explicit_ncqq_command(self, event: AstrMessageEvent) -> bool:
@@ -217,6 +221,36 @@ class NCQQManagerPlugin(
         """存入原生 SQLite KV 数据库"""
         await self.put_kv_data("user_mapping", mapping_dict)
 
+    def default_manager_id(self) -> str:
+        return self.clients.default_id
+
+    def manager_ids(self) -> list[str]:
+        return self.clients.ids()
+
+    def manager_label(self, manager_id: str = "") -> str:
+        profile = self.clients.profile(manager_id)
+        return f"{profile.id}({profile.name})"
+
+    def normalize_manager_id(self, manager_id: object = "") -> str:
+        return self.clients.normalize_id(manager_id)
+
+    def client_for_manager(self, manager_id: object = ""):
+        return self.clients.get(manager_id)
+
+    def split_instance_ref(
+        self,
+        value: object,
+        fallback_manager: object = "",
+    ) -> tuple[str, str]:
+        text = str(value or "").strip()
+        if "/" in text:
+            manager_id, instance_name = text.split("/", 1)
+            return self.normalize_manager_id(manager_id), instance_name.strip()
+        return self.normalize_manager_id(fallback_manager), text
+
+    def format_instance_ref(self, manager_id: object, instance_name: object) -> str:
+        return f"{self.normalize_manager_id(manager_id)}/{str(instance_name).strip()}"
+
     def get_astrbot_admins(self) -> list[str]:
         """Return AstrBot global admin QQ list from config admins_id."""
         return [str(a) for a in self.context.get_config().get("admins_id", [])]
@@ -248,21 +282,32 @@ class NCQQManagerPlugin(
             return True
         return group_id in self.response_group_ids()
 
-    async def get_allowed_instances(self, sender_id: str) -> list:
+    async def get_allowed_instance_refs(self, sender_id: str) -> list[tuple[str, str]]:
+        mapping = await self.get_user_mapping()
+        refs: list[tuple[str, str]] = []
+        users = mapping.values() if str(sender_id) in self.get_astrbot_admins() else [mapping.get(str(sender_id), {})]
+        for data in users:
+            for raw in data.get("instances", []):
+                try:
+                    manager_id, instance_name = self.split_instance_ref(raw)
+                except KeyError:
+                    continue
+                if instance_name and (manager_id, instance_name) not in refs:
+                    refs.append((manager_id, instance_name))
+        return refs
+
+    async def get_allowed_instances(self, sender_id: str, manager_id: str = "") -> list:
         """Return instances for sender_id.
 
         AstrBot admins (admins_id) are treated as super-owners and have
         access to all instances across all bound users.
         """
-        mapping = await self.get_user_mapping()
-        if str(sender_id) in self.get_astrbot_admins():
-            all_instances: list[str] = []
-            for data in mapping.values():
-                for inst in data.get("instances", []):
-                    if inst not in all_instances:
-                        all_instances.append(inst)
-            return all_instances
-        return mapping.get(str(sender_id), {}).get("instances", [])
+        normalized = self.normalize_manager_id(manager_id)
+        return [
+            instance_name
+            for ref_manager, instance_name in await self.get_allowed_instance_refs(sender_id)
+            if ref_manager == normalized
+        ]
 
     def get_first_at_user_id(self, event: AstrMessageEvent) -> str | None:
         for comp in event.get_messages():
@@ -270,9 +315,8 @@ class NCQQManagerPlugin(
                 return str(comp.qq)
         return None
 
-    async def get_instances_for_user(self, user_id: str) -> list[str]:
-        mapping = await self.get_user_mapping()
-        return mapping.get(str(user_id), {}).get("instances", [])
+    async def get_instances_for_user(self, user_id: str, manager_id: str = "") -> list[str]:
+        return await self.get_allowed_instances(str(user_id), manager_id)
 
     # ------------------------------------------------------------------
     # Reply-based approval shortcut listener
