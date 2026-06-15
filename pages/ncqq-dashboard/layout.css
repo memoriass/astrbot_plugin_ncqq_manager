@@ -142,6 +142,14 @@ body::after {
 .view-panel.active {
   position: relative;
   z-index: 1;
+  min-height: calc(100vh - 56px);
+  padding: 22px;
+  border: 1px solid rgb(255 255 255 / 82%);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 72%);
+  box-shadow:
+    0 28px 76px rgb(25 38 47 / 14%),
+    inset 0 1px 0 rgb(255 255 255 / 80%);
 }
 
 .section-head h2 {
@@ -268,10 +276,10 @@ body::after {
 .instance-workspace .manager-section {
   min-width: 0;
   padding: 22px;
-  border: 1px solid rgb(255 255 255 / 76%);
+  border: 1px solid rgb(30 42 52 / 8%);
   border-radius: 8px;
-  background: rgb(255 255 255 / 78%);
-  box-shadow: 0 24px 60px rgb(29 42 53 / 12%);
+  background: rgb(255 255 255 / 64%);
+  box-shadow: 0 18px 44px rgb(29 42 53 / 9%);
 }
 
 .manager-title {
