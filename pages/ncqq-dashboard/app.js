@@ -1,10 +1,7 @@
 (function () {
   const els = {
-    approvalCount: document.getElementById("approval-count"),
-    bindingCount: document.getElementById("binding-count"),
     approvals: document.getElementById("approvals"),
     bindings: document.getElementById("bindings"),
-    instanceCount: document.getElementById("instance-count"),
     managers: document.getElementById("managers"),
     refresh: document.getElementById("refresh"),
     toast: document.getElementById("toast"),
@@ -145,7 +142,9 @@
   function setActiveView(view) {
     activeView = view || "instances";
     document.querySelectorAll("[data-view]").forEach((item) => {
-      item.classList.toggle("active", item.dataset.view === activeView);
+      let active = item.dataset.view === activeView;
+      if (active && activeView === "instances") active = item.dataset.managerId === activeManagerId;
+      item.classList.toggle("active", active);
     });
     document.querySelectorAll("[data-view-panel]").forEach((item) => {
       item.classList.toggle("active", item.dataset.viewPanel === activeView);
@@ -153,18 +152,32 @@
   }
 
   function render(data) {
-    renderNavCounts(data);
+    renderSidebarNav(data);
     renderManagers(data.managers || []);
     renderApprovals(data.approvals || []);
     renderBindings(data.bindings || []);
   }
 
-  function renderNavCounts(data) {
+  function renderSidebarNav(data) {
     const managers = data.managers || [];
-    const total = managers.reduce((sum, item) => sum + Number(item.instances?.total || 0), 0);
-    els.instanceCount.textContent = String(total);
-    els.bindingCount.textContent = String((data.bindings || []).length);
-    els.approvalCount.textContent = String((data.approvals || []).length);
+    ensureActiveManager(managers);
+    els.tabs.innerHTML = [
+      ...managers.map(renderManagerTab),
+      navTab("bindings", String((data.bindings || []).length), "绑定"),
+      navTab("approvals", String((data.approvals || []).length), "审批"),
+    ].join("");
+    setActiveView(activeView);
+  }
+
+  function navTab(view, value, label) {
+    return `<button class="tab-button" type="button" data-view="${view}"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></button>`;
+  }
+
+  function renderManagerTab(manager) {
+    const instances = manager.instances || {};
+    const label = manager.name || manager.id;
+    const value = `${instances.online || 0}/${instances.total || 0}`;
+    return `<button class="tab-button node-tab" type="button" data-view="instances" data-manager-id="${escapeHtml(manager.id)}"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></button>`;
   }
 
   function renderManagers(managers) {
@@ -181,40 +194,11 @@
     els.managers.innerHTML = `
       <div class="instance-workspace">
         <aside class="sub-panel">
-          ${renderManagerSelector(managers)}
           ${renderInstanceFilters(manager.instances?.items || [])}
           ${renderInstanceSwitch(statusItems)}
         </aside>
         ${renderManagerSection(manager)}
       </div>
-    `;
-  }
-
-  function renderManagerSelector(managers) {
-    return `
-      <section class="sub-group">
-        <h3>面板</h3>
-        <div class="manager-selector" aria-label="后端选择">${managers.map(renderManagerCard).join("")}</div>
-      </section>
-    `;
-  }
-
-  function renderManagerCard(manager) {
-    const instances = manager.instances || {};
-    const state = managerState(manager.health || {});
-    const url = shortUrl(manager.url);
-    return `
-      <button class="manager-card ${manager.id === activeManagerId ? "active" : ""}" type="button" data-manager-id="${escapeHtml(manager.id)}" aria-pressed="${manager.id === activeManagerId}">
-        <span class="manager-card-head">
-          <strong>${escapeHtml(manager.name || manager.id)}</strong>
-          <span class="status-chip ${state}">${escapeHtml(manager.health?.status || "-")}</span>
-        </span>
-        <span class="manager-card-url">${escapeHtml(manager.id)} · ${escapeHtml(url)}</span>
-        <span class="manager-card-stats">
-          <span>${escapeHtml(`${instances.online || 0}/${instances.total || 0}`)} 在线</span>
-          <span>${escapeHtml(`${instances.running || 0}/${instances.total || 0}`)} 运行</span>
-        </span>
-      </button>
     `;
   }
 
@@ -433,6 +417,14 @@
   els.tabs.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-view]");
     if (!button) return;
+    if (button.dataset.managerId) {
+      activeManagerId = button.dataset.managerId;
+      activeInstanceName = "";
+      if (activeManagerId) pages.instances[activeManagerId] = 1;
+      setActiveView("instances");
+      if (currentData) renderManagers(currentData.managers || []);
+      return;
+    }
     setActiveView(button.dataset.view);
   });
   els.managers.addEventListener("click", (event) => {

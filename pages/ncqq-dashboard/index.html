@@ -12,17 +12,7 @@
     <div class="shell app-frame">
       <aside class="side-rail" aria-label="主导航">
         <div class="rail-logo">ncqq</div>
-        <nav id="view-tabs" class="view-tabs" aria-label="页面切换">
-          <button class="tab-button active" type="button" data-view="instances">
-            <strong id="instance-count">0</strong><span>实例</span>
-          </button>
-          <button class="tab-button" type="button" data-view="bindings">
-            <strong id="binding-count">0</strong><span>绑定</span>
-          </button>
-          <button class="tab-button" type="button" data-view="approvals">
-            <strong id="approval-count">0</strong><span>审批</span>
-          </button>
-        </nav>
+        <nav id="view-tabs" class="view-tabs" aria-label="节点与页面切换"></nav>
         <button id="refresh" class="icon-button nav-refresh" type="button" title="刷新" aria-label="刷新">
           ↻
         </button>
@@ -30,9 +20,6 @@
 
       <main class="view-shell">
         <section id="view-instances" class="view-panel active" data-view-panel="instances">
-          <div class="section-head">
-            <h2>实例</h2>
-          </div>
           <div id="managers" class="manager-grid"></div>
         </section>
 
