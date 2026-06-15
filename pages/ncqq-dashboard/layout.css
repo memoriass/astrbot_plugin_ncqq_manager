@@ -1,7 +1,7 @@
 body {
   position: relative;
   min-height: 100vh;
-  background: #eceff1;
+  background: #f5f6f4;
 }
 
 body::before,
@@ -15,27 +15,32 @@ body::before {
   inset: 0;
   z-index: 0;
   background:
-    linear-gradient(90deg, rgb(0 0 0 / 4%) 1px, transparent 1px),
-    linear-gradient(rgb(0 0 0 / 4%) 1px, transparent 1px),
-    linear-gradient(120deg, #f7f8f8 0%, #eef2f1 44%, #e1e6e4 100%);
+    radial-gradient(circle, rgb(24 35 43 / 8%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(24 35 43 / 6%) 1px, transparent 1px),
+    linear-gradient(rgb(24 35 43 / 5%) 1px, transparent 1px),
+    linear-gradient(120deg, #fafafa 0%, #eff3f1 50%, #e8edeb 100%);
   background-size:
+    8px 8px,
     48px 48px,
     48px 48px,
     auto;
 }
 
 body::after {
-  right: -8vw;
-  top: 4vh;
+  right: -10vw;
+  top: 2vh;
   z-index: 0;
-  width: 68vw;
-  height: 70vh;
-  border-radius: 38% 22% 34% 28%;
+  width: 78vw;
+  height: 78vh;
+  border-radius: 44% 24% 38% 26%;
   background:
-    linear-gradient(135deg, rgb(242 244 242 / 78%), rgb(115 128 121 / 36) 48%, rgb(250 251 249 / 70)),
-    repeating-linear-gradient(110deg, rgb(62 72 68 / 10%) 0 2px, transparent 2px 18px);
-  filter: saturate(0.8);
-  opacity: 0.86;
+    radial-gradient(circle at 44% 8%, rgb(98 126 86 / 32%) 0 6%, transparent 18%),
+    radial-gradient(circle at 34% 56%, rgb(20 24 23 / 46%) 0 20%, transparent 48%),
+    radial-gradient(circle at 72% 44%, rgb(124 133 127 / 42%) 0 23%, transparent 50%),
+    linear-gradient(135deg, rgb(236 239 235 / 82%), rgb(85 94 90 / 46) 52%, rgb(248 249 247 / 72));
+  filter: saturate(0.86) contrast(0.92);
+  opacity: 0.9;
+  transform: rotate(-4deg);
 }
 
 .app-frame {
@@ -56,14 +61,36 @@ body::after {
   grid-template-rows: auto 1fr auto;
   gap: 18px;
   padding: 16px 10px;
-  border-right: 1px solid var(--line);
-  background: rgb(255 255 255 / 86%);
-  box-shadow: 14px 0 36px rgb(30 42 52 / 8%);
+  border-right: 1px solid rgb(22 30 38 / 12%);
+  background:
+    radial-gradient(circle, rgb(24 35 43 / 10%) 1px, transparent 1px),
+    rgb(255 255 255 / 94%);
+  background-size:
+    7px 7px,
+    auto;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.side-rail::after {
+  content: "";
+  position: absolute;
+  left: -16px;
+  bottom: 14px;
+  width: 82px;
+  height: 24px;
+  background: #ffd122;
+  transform: rotate(46deg);
+  transform-origin: center;
 }
 
 .rail-logo {
-  display: grid;
-  place-items: center;
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   min-height: 34px;
   border-bottom: 1px solid var(--line);
   color: var(--text);
@@ -71,7 +98,19 @@ body::after {
   font-weight: 800;
 }
 
+.rail-logo::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  margin-right: 4px;
+  display: inline-block;
+  border-radius: 2px;
+  background: #050606;
+}
+
 .view-tabs {
+  position: relative;
+  z-index: 1;
   display: grid;
   align-content: start;
   gap: 8px;
@@ -89,14 +128,14 @@ body::after {
   place-items: center;
   gap: 3px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 0;
   background: transparent;
   color: var(--muted);
   overflow: hidden;
 }
 
 .tab-button strong {
-  font-size: 22px;
+  font-size: 23px;
   line-height: 1;
 }
 
@@ -110,9 +149,9 @@ body::after {
 }
 
 .tab-button.active {
-  background: rgb(238 243 245 / 92%);
+  background: rgb(255 255 255 / 68%);
   color: var(--text);
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 72%);
+  box-shadow: none;
 }
 
 .tab-button.active::before {
@@ -121,12 +160,14 @@ body::after {
   left: 0;
   top: 12px;
   bottom: 12px;
-  width: 3px;
-  border-radius: 999px;
-  background: var(--accent);
+  width: 2px;
+  border-radius: 0;
+  background: #050606;
 }
 
 .nav-refresh {
+  position: relative;
+  z-index: 1;
   width: 38px;
   height: 38px;
   justify-self: center;
@@ -136,20 +177,22 @@ body::after {
 .view-shell {
   position: relative;
   min-width: 0;
-  padding: 28px 32px;
+  padding: 34px 42px;
 }
 
 .view-panel.active {
   position: relative;
   z-index: 1;
-  min-height: calc(100vh - 56px);
-  padding: 22px;
-  border: 1px solid rgb(255 255 255 / 82%);
-  border-radius: 10px;
-  background: rgb(255 255 255 / 72%);
+  width: min(1080px, 100%);
+  min-height: calc(100vh - 108px);
+  margin: 0 auto;
+  padding: 26px;
+  border: 1px solid rgb(24 35 43 / 10%);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 91%);
   box-shadow:
-    0 28px 76px rgb(25 38 47 / 14%),
-    inset 0 1px 0 rgb(255 255 255 / 80%);
+    0 22px 52px rgb(20 28 35 / 16%),
+    inset 0 1px 0 rgb(255 255 255 / 92%);
 }
 
 .section-head h2 {
@@ -158,8 +201,8 @@ body::after {
 
 .instance-workspace {
   display: grid;
-  grid-template-columns: 228px minmax(0, 1fr);
-  gap: 24px;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 22px;
   align-items: start;
 }
 
@@ -170,11 +213,12 @@ body::after {
   display: grid;
   align-content: start;
   gap: 18px;
-  padding: 14px;
-  border: 1px solid rgb(255 255 255 / 72%);
-  border-radius: 8px;
-  background: rgb(255 255 255 / 74%);
-  box-shadow: 0 18px 44px rgb(31 43 53 / 11%);
+  padding: 0 18px 0 0;
+  border: 0;
+  border-right: 1px solid rgb(24 35 43 / 10%);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .sub-group {
@@ -231,7 +275,7 @@ body::after {
   justify-content: start;
   padding: 9px 10px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 4px;
   background: transparent;
   color: var(--muted);
   text-align: left;
@@ -275,11 +319,11 @@ body::after {
 
 .instance-workspace .manager-section {
   min-width: 0;
-  padding: 22px;
-  border: 1px solid rgb(30 42 52 / 8%);
-  border-radius: 8px;
-  background: rgb(255 255 255 / 64%);
-  box-shadow: 0 18px 44px rgb(29 42 53 / 9%);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .manager-title {
