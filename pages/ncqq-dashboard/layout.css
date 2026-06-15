@@ -1,0 +1,262 @@
+body {
+  min-height: 100vh;
+}
+
+.app-frame {
+  width: min(1720px, 100%);
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 98px minmax(0, 1fr);
+  padding: 0;
+}
+
+.side-rail {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 18px;
+  padding: 16px 10px;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.rail-logo {
+  display: grid;
+  place-items: center;
+  min-height: 34px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.view-tabs {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow: visible;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.tab-button {
+  position: relative;
+  min-width: 0;
+  min-height: 74px;
+  display: grid;
+  place-items: center;
+  gap: 3px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.tab-button strong {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.tab-button span {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.tab-button.active {
+  background: var(--soft);
+  color: var(--text);
+}
+
+.tab-button.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.nav-refresh {
+  width: 38px;
+  height: 38px;
+  justify-self: center;
+  margin: 0;
+}
+
+.view-shell {
+  min-width: 0;
+  padding: 24px 28px;
+}
+
+.section-head h2 {
+  font-size: 22px;
+}
+
+.instance-workspace {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.sub-panel {
+  position: sticky;
+  top: 18px;
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  padding-right: 14px;
+  border-right: 1px solid var(--line);
+}
+
+.sub-group {
+  display: grid;
+  gap: 8px;
+}
+
+.sub-group h3 {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+.manager-selector,
+.instance-filter,
+.instance-switch {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.manager-card {
+  min-height: 0;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+.manager-card.active,
+.instance-filter button.active,
+.instance-switch button.active {
+  border-color: var(--line);
+  background: var(--soft);
+  color: var(--text);
+  box-shadow: none;
+}
+
+.manager-card-stats span {
+  background: var(--panel);
+}
+
+.instance-filter button,
+.instance-switch button {
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+  justify-content: start;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+}
+
+.instance-filter button strong,
+.instance-switch button strong {
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.instance-filter button span,
+.instance-switch button span {
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 1;
+}
+
+.instance-switch button strong {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.instance-switch button strong.online {
+  color: var(--ok);
+}
+
+.instance-switch button strong.warn {
+  color: var(--warn);
+}
+
+.instance-switch button strong.offline {
+  color: var(--offline);
+}
+
+.instance-workspace .manager-section {
+  min-width: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+@media (max-width: 860px) {
+  .app-frame {
+    grid-template-columns: 1fr;
+  }
+
+  .side-rail {
+    position: static;
+    height: auto;
+    grid-template-columns: auto 1fr auto;
+    grid-template-rows: auto;
+    align-items: center;
+    padding: 10px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .rail-logo {
+    min-width: 52px;
+    border-bottom: 0;
+  }
+
+  .view-tabs {
+    grid-template-columns: repeat(3, minmax(64px, 1fr));
+  }
+
+  .tab-button {
+    min-height: 56px;
+  }
+
+  .view-shell {
+    padding: 16px;
+  }
+
+  .instance-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .sub-panel {
+    position: static;
+    padding-right: 0;
+    border-right: 0;
+  }
+}

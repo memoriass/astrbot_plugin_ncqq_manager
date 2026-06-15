@@ -1,8 +1,10 @@
 (function () {
   const els = {
     approvalCount: document.getElementById("approval-count"),
+    bindingCount: document.getElementById("binding-count"),
     approvals: document.getElementById("approvals"),
     bindings: document.getElementById("bindings"),
+    instanceCount: document.getElementById("instance-count"),
     managers: document.getElementById("managers"),
     refresh: document.getElementById("refresh"),
     toast: document.getElementById("toast"),
@@ -13,6 +15,7 @@
   let currentData = null;
   let activeView = "instances";
   let activeManagerId = "";
+  let activeInstanceName = "";
   let instanceFilter = "all";
   const pageSize = { instances: 9, bindings: 8 };
   const pages = { instances: {}, bindings: 1 };
@@ -73,13 +76,23 @@
     activeManagerId = (preferred || managers[0] || {}).id || "";
   }
 
-  function filterInstances(items) {
+  function instanceName(item) {
+    return String(item.name || item.display_name || "").trim();
+  }
+
+  function filterByStatus(items) {
     if (instanceFilter === "all") return items;
     return items.filter((item) => {
       const key = instanceState(item).key;
       if (instanceFilter === "abnormal") return key !== "online";
       return key === instanceFilter;
     });
+  }
+
+  function filterInstances(items) {
+    const byStatus = filterByStatus(items);
+    if (!activeInstanceName) return byStatus;
+    return byStatus.filter((item) => instanceName(item) === activeInstanceName);
   }
 
   function clampPage(value, total, size) {
@@ -140,16 +153,18 @@
   }
 
   function render(data) {
-    renderApprovalCount(data.approvals || []);
+    renderNavCounts(data);
     renderManagers(data.managers || []);
     renderApprovals(data.approvals || []);
     renderBindings(data.bindings || []);
   }
 
-  function renderApprovalCount(approvals) {
-    const count = approvals.length;
-    els.approvalCount.textContent = String(count);
-    els.approvalCount.hidden = count <= 0;
+  function renderNavCounts(data) {
+    const managers = data.managers || [];
+    const total = managers.reduce((sum, item) => sum + Number(item.instances?.total || 0), 0);
+    els.instanceCount.textContent = String(total);
+    els.bindingCount.textContent = String((data.bindings || []).length);
+    els.approvalCount.textContent = String((data.approvals || []).length);
   }
 
   function renderManagers(managers) {
@@ -159,11 +174,29 @@
     }
     ensureActiveManager(managers);
     const manager = managers.find((item) => item.id === activeManagerId) || managers[0];
-    els.managers.innerHTML = renderManagerSelector(managers) + renderManagerSection(manager);
+    const statusItems = filterByStatus(manager.instances?.items || []);
+    if (activeInstanceName && !statusItems.some((item) => instanceName(item) === activeInstanceName)) {
+      activeInstanceName = "";
+    }
+    els.managers.innerHTML = `
+      <div class="instance-workspace">
+        <aside class="sub-panel">
+          ${renderManagerSelector(managers)}
+          ${renderInstanceFilters(manager.instances?.items || [])}
+          ${renderInstanceSwitch(statusItems)}
+        </aside>
+        ${renderManagerSection(manager)}
+      </div>
+    `;
   }
 
   function renderManagerSelector(managers) {
-    return `<div class="manager-selector" aria-label="后端选择">${managers.map(renderManagerCard).join("")}</div>`;
+    return `
+      <section class="sub-group">
+        <h3>面板</h3>
+        <div class="manager-selector" aria-label="后端选择">${managers.map(renderManagerCard).join("")}</div>
+      </section>
+    `;
   }
 
   function renderManagerCard(manager) {
@@ -176,10 +209,10 @@
           <strong>${escapeHtml(manager.name || manager.id)}</strong>
           <span class="status-chip ${state}">${escapeHtml(manager.health?.status || "-")}</span>
         </span>
-        <span class="manager-card-url">${escapeHtml(manager.id)} · ${escapeHtml(url)}${manager.is_default ? " · default" : ""}</span>
+        <span class="manager-card-url">${escapeHtml(manager.id)} · ${escapeHtml(url)}</span>
         <span class="manager-card-stats">
-          <span>实例 ${escapeHtml(`${instances.online || 0}/${instances.total || 0}`)}</span>
-          <span>容器 ${escapeHtml(`${instances.running || 0}/${instances.total || 0}`)}</span>
+          <span>${escapeHtml(`${instances.online || 0}/${instances.total || 0}`)} 在线</span>
+          <span>${escapeHtml(`${instances.running || 0}/${instances.total || 0}`)} 运行</span>
         </span>
       </button>
     `;
@@ -203,7 +236,6 @@
             <p class="manager-url">${escapeHtml(manager.id)} · ${escapeHtml(url)}${manager.is_default ? " · default" : ""}</p>
           </div>
           <div class="manager-actions">
-            ${renderInstanceFilters(items)}
             <div class="manager-meta">
               <span class="status-chip ${state}">${escapeHtml(health.status || "-")}</span>
               <span>实例 ${escapeHtml(`${instances.online || 0}/${instances.total || 0}`)}</span>
@@ -224,12 +256,37 @@
       if (key !== "online") counts.abnormal += 1;
       if (counts[key] !== undefined) counts[key] += 1;
     });
-    return `<div class="instance-filter" aria-label="实例筛选">${instanceFilters
-      .map(
-        ([key, label]) =>
-          `<button class="${key === instanceFilter ? "active" : ""}" type="button" data-instance-filter="${key}">${label}<span>${counts[key]}</span></button>`,
-      )
-      .join("")}</div>`;
+    return `
+      <section class="sub-group">
+        <h3>状态</h3>
+        <div class="instance-filter" aria-label="实例筛选">${instanceFilters
+          .map(
+            ([key, label]) =>
+              `<button class="${key === instanceFilter ? "active" : ""}" type="button" data-instance-filter="${key}"><strong>${counts[key]}</strong><span>${label}</span></button>`,
+          )
+          .join("")}</div>
+      </section>
+    `;
+  }
+
+  function renderInstanceSwitch(items) {
+    return `
+      <section class="sub-group">
+        <h3>实例</h3>
+        <div class="instance-switch" aria-label="实例切换">
+          <button class="${activeInstanceName ? "" : "active"}" type="button" data-instance-name="">
+            <strong>${items.length}</strong><span>全部实例</span>
+          </button>
+          ${items
+            .map((item) => {
+              const name = instanceName(item);
+              const state = instanceState(item);
+              return `<button class="${name === activeInstanceName ? "active" : ""}" type="button" data-instance-name="${escapeHtml(name)}"><strong class="${state.key}">${escapeHtml(state.text)}</strong><span>${escapeHtml(item.display_name || name || "-")}</span></button>`;
+            })
+            .join("")}
+        </div>
+      </section>
+    `;
   }
 
   function renderInstancePage(items, managerId, page, total) {
@@ -383,12 +440,21 @@
     const managerButton = event.target.closest("button[data-manager-id]");
     if (managerButton) {
       activeManagerId = managerButton.dataset.managerId || "";
+      activeInstanceName = "";
       if (currentData) renderManagers(currentData.managers || []);
       return;
     }
     const filterButton = event.target.closest("button[data-instance-filter]");
     if (filterButton) {
       instanceFilter = filterButton.dataset.instanceFilter || "all";
+      activeInstanceName = "";
+      if (activeManagerId) pages.instances[activeManagerId] = 1;
+      if (currentData) renderManagers(currentData.managers || []);
+      return;
+    }
+    const instanceButton = event.target.closest("button[data-instance-name]");
+    if (instanceButton) {
+      activeInstanceName = instanceButton.dataset.instanceName || "";
       if (activeManagerId) pages.instances[activeManagerId] = 1;
       if (currentData) renderManagers(currentData.managers || []);
       return;
