@@ -1,8 +1,8 @@
 (function () {
   const els = {
+    approvalCount: document.getElementById("approval-count"),
     approvals: document.getElementById("approvals"),
     bindings: document.getElementById("bindings"),
-    kpis: document.getElementById("kpis"),
     managers: document.getElementById("managers"),
     refresh: document.getElementById("refresh"),
     toast: document.getElementById("toast"),
@@ -140,29 +140,16 @@
   }
 
   function render(data) {
-    renderKpis(data);
+    renderApprovalCount(data.approvals || []);
     renderManagers(data.managers || []);
     renderApprovals(data.approvals || []);
     renderBindings(data.bindings || []);
   }
 
-  function renderKpis(data) {
-    const managers = data.managers || [];
-    const approvals = data.approvals || [];
-    const running = managers.reduce((sum, item) => sum + Number(item.instances?.running || 0), 0);
-    const total = managers.reduce((sum, item) => sum + Number(item.instances?.total || 0), 0);
-    const online = managers.reduce((sum, item) => sum + Number(item.instances?.online || 0), 0);
-    const healthyManagers = managers.reduce((sum, item) => sum + (item.health?.ok ? 1 : 0), 0);
-    els.kpis.innerHTML = [
-      kpi("ncqq 后端", `${healthyManagers}/${managers.length}`),
-      kpi("实例在线", `${online}/${total}`),
-      kpi("容器运行", `${running}/${total}`),
-      kpi("待审批", approvals.length),
-    ].join("");
-  }
-
-  function kpi(label, value) {
-    return `<article class="kpi"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`;
+  function renderApprovalCount(approvals) {
+    const count = approvals.length;
+    els.approvalCount.textContent = String(count);
+    els.approvalCount.hidden = count <= 0;
   }
 
   function renderManagers(managers) {
