@@ -88,7 +88,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["check_health"] --> B["并发读取目标 manager 健康子项"]
+    A["内部健康聚合"] --> B["并发读取目标 manager 健康子项"]
     B --> C["/api/health"]
     B --> D["BotShepherd status / activation / heartbeat"]
     B --> E["/api/bots"]

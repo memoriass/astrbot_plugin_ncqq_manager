@@ -82,34 +82,6 @@ COMPILED_WORKFLOWS: dict[str, CompiledWorkflow] = {
         purpose="查看已配置后端端点，不显示 token 明文。",
         user_visible=False,
     ),
-    "check_health": CompiledWorkflow(
-        workflow="check_health",
-        title="综合健康检查流程",
-        purpose="一次汇总管理器、BotShepherd、Bot 运行态、后端端点和实例概览。",
-        admin_only=True,
-        user_visible=False,
-    ),
-    "check_manager": CompiledWorkflow(
-        workflow="check_manager",
-        title="管理器健康检测流程",
-        purpose="检测 ncqq-manager、Docker、状态引擎和基础依赖状态。",
-        admin_only=True,
-        user_visible=False,
-    ),
-    "check_botshepherd": CompiledWorkflow(
-        workflow="check_botshepherd",
-        title="BotShepherd 检测流程",
-        purpose="检测 BotShepherd 进程、激活状态和心跳。",
-        admin_only=True,
-        user_visible=False,
-    ),
-    "check_bot_runtime": CompiledWorkflow(
-        workflow="check_bot_runtime",
-        title="Bot 运行态检测流程",
-        purpose="查看已知 Bot 的 WS 连接和账号运行态。",
-        admin_only=True,
-        user_visible=False,
-    ),
     "read_bot_messages": CompiledWorkflow(
         workflow="read_bot_messages",
         title="Bot 消息读取流程",
@@ -170,11 +142,6 @@ _ACTION_ALIASES: dict[str, str] = {
 }
 
 _LIFECYCLE_ACTIONS = {"start", "stop", "restart", "pause", "unpause", "kill"}
-_DETAIL_HEALTH_WORKFLOWS = {
-    "check_manager",
-    "check_botshepherd",
-    "check_bot_runtime",
-}
 _APPROVAL_ACTION_ALIASES: dict[str, str] = {
     "": "list",
     "list": "list",

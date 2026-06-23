@@ -14,7 +14,7 @@
 | `workflows/formatters.py` | workflow 输出文本格式化。 |
 | `workflows/access.py` | 目标实例、权限、后端别名、绑定关系辅助。 |
 | `workflows/instance_flows.py` | 实例创建、重登、控制、接后端、检测、删除。 |
-| `workflows/admin_flows.py` | 健康、Bot runtime、消息、审计、资源、配置读取。 |
+| `workflows/admin_flows.py` | 内部健康 helper、消息、审计、资源、配置读取。 |
 
 ## 主流程
 
@@ -25,7 +25,7 @@
 | `manage_backend` | `intent=list/check/connect` | 后端端点主入口。 |
 | `review_approvals` | `action=list/approve/reject` | 审批主入口。 |
 
-健康聚合不属于公开 `query` 范围；`check_health` 和细分健康 workflow 只供内部代码、Plugin Pages 和定时监控使用。
+健康聚合不属于公开 `query` 范围，也不注册到 `COMPILED_WORKFLOWS`；Plugin Pages 和定时监控直接调用内部健康代码。
 
 ## 多面板约定
 

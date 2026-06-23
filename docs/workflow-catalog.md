@@ -13,7 +13,7 @@
 
 ## 细分 Workflow
 
-细分入口可直接调用，但聊天场景优先选择主 workflow；健康类细分入口只供内部代码、Plugin Pages 和定时监控使用。
+细分入口可直接调用，但聊天场景优先选择主 workflow。健康能力不注册为 workflow；Plugin Pages 和定时监控直接调用内部健康代码。
 
 | workflow | 来源 | 说明 |
 | --- | --- | --- |
@@ -24,7 +24,6 @@
 | `check_instance` | `query scope=instance` | 检测实例存在、登录、资源、日志和可选配置。 |
 | `list_instances` | `query scope=instances` | 查看实例状态和绑定关系。 |
 | `check_backends` | `query scope=backends` | 查看后端端点，不展示 token 明文。 |
-| `check_health` | 内部使用 | 聚合 ncqq-manager、BotShepherd、Bot runtime、实例和后端状态；不开放给自然语言工具或 `/ncqq` 外部命令。 |
 | `read_bot_messages` | `query scope=messages` | 管理员读取指定 Bot 最近消息缓存。 |
 | `audit_operations` | `query scope=audit` | 管理员读取最近操作日志。 |
 | `inspect_resources` | `query scope=resources` | 管理员查看镜像和节点资产。 |

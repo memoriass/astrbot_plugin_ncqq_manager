@@ -15,7 +15,7 @@ AstrBot 的 LLM 工具来自插件代码注册，不读取 `docs/*.md` 作为工
 
 `ncqq_manager` 只处理明确提到 ncqq、NapCatQQ、ncqq-manager、BotShepherd、OneBot、已配置面板或已绑定 NapCatQQ 实例的请求。它不得承接 AstrBot 自身、模型提供商、其他插件、网站、服务器、Docker 通用服务或未知对象的健康检查。
 
-健康类 workflow 不开放给自然语言 LLM 工具调用，也不开放给 `/ncqq` 外部命令。`check_health`、`check_manager`、`check_botshepherd`、`check_bot_runtime` 只保留给内部代码、Plugin Pages 和定时监控。旧的 `query scope=health/manager/botshepherd/runtime` 写法只用于公开入口识别并阻断，不再进入 `query` 调度。来自 LLM tool 的健康类调用会被直接忽略，不输出健康检查结果，避免拦截任何通用“健康检查”请求。
+健康能力不注册为对外 workflow，也不开放给自然语言 LLM 工具调用或 `/ncqq` 外部命令。Plugin Pages 和定时监控直接调用插件内部健康代码。旧的 `check_health`、`check_manager`、`check_botshepherd`、`check_bot_runtime` 以及 `query scope=health/manager/botshepherd/runtime` 写法只用于公开入口识别并阻断，不进入 workflow 调度。来自 LLM tool 的健康类调用会被直接忽略，不输出健康检查结果，避免拦截任何通用“健康检查”请求。
 
 | 文件 | 职责 |
 | --- | --- |

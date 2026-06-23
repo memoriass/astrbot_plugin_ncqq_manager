@@ -41,7 +41,7 @@
 
 ## Workflow 层
 
-聊天侧只暴露 workflow，不直接暴露底层 API 包装。优先使用主 workflow：`manage_instance`、`query`、`manage_backend`、`review_approvals`；健康类 workflow 除外，细分 workflow 仍可直接调用，并作为主流程内部路由目标。
+聊天侧只暴露 workflow，不直接暴露底层 API 包装。优先使用主 workflow：`manage_instance`、`query`、`manage_backend`、`review_approvals`；细分 workflow 仍可直接调用，并作为主流程内部路由目标。健康能力不进入 workflow 注册表。
 
 对外入口从 `workflows` 导入：
 
@@ -82,13 +82,14 @@
 
 ## 健康与监控
 
-健康聚合只保留给内部代码、Plugin Pages 和定时监控，不通过自然语言 LLM 工具或 `/ncqq` 外部命令暴露。内部聚合 workflow 为 `check_health`，旧的细分 ID：
+健康聚合只保留给内部代码、Plugin Pages 和定时监控，不通过自然语言 LLM 工具或 `/ncqq` 外部命令暴露，也不注册到 `COMPILED_WORKFLOWS`。历史健康 ID：
 
+- `check_health`
 - `check_manager`
 - `check_botshepherd`
 - `check_bot_runtime`
 
-会在内部调度层映射到 `check_health detail`。公开入口必须直接忽略或拒绝健康类调用，避免承接通用系统、其他插件或外部服务的健康检查。健康聚合只覆盖 ncqq-manager 管理器健康、BotShepherd 状态、Bot runtime、容器列表和后端端点，后端端点读取失败应显示 WARN。
+只用于公开入口识别并阻断，不进入 workflow 调度。公开入口必须直接忽略或拒绝健康类调用，避免承接通用系统、其他插件或外部服务的健康检查。健康聚合只覆盖 ncqq-manager 管理器健康、BotShepherd 状态、Bot runtime、容器列表和后端端点，后端端点读取失败应显示 WARN。
 
 ## 文档维护
 

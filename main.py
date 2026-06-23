@@ -26,12 +26,37 @@ _NCQQ_HEALTH_WORKFLOWS = {
     "check_manager",
     "check_botshepherd",
     "check_bot_runtime",
+    "health",
+    "health_check",
+    "manager",
+    "manager_health",
+    "botshepherd",
+    "botshepherd_health",
+    "runtime",
+    "bot_runtime",
+    "bot_runtime_health",
+    "健康",
 }
-_NCQQ_HEALTH_QUERY_SCOPES = {"health", "manager", "botshepherd", "runtime"}
+_NCQQ_HEALTH_QUERY_SCOPES = {
+    "health",
+    "health_check",
+    "manager",
+    "manager_health",
+    "botshepherd",
+    "botshepherd_health",
+    "runtime",
+    "bot_runtime",
+    "bot_runtime_health",
+    "健康",
+}
 
 
 def _tool_key(value: object) -> str:
     return str(value or "").strip().lower().replace("-", "_")
+
+
+def _is_health_workflow_name(value: object) -> bool:
+    return _tool_key(value) in _NCQQ_HEALTH_WORKFLOWS
 
 
 @register(
@@ -148,8 +173,9 @@ class NCQQManagerPlugin(
         Specific non-health workflows such as create_instance, relogin_instance,
         control_instance, connect_backend, and read_instance_config remain
         directly callable when the model already knows the exact flow. Health
-        workflows remain registered for internal use, but LLM tool calls to
-        them are ignored.
+        checks are not external workflow choices; Plugin Pages and scheduled
+        monitoring call internal health code directly. Tool calls that name
+        health workflows are ignored.
 
         Args:
             workflow(string): One workflow scenario id from the list above.
@@ -227,6 +253,10 @@ class NCQQManagerPlugin(
             yield event.plain_result(self._NCQQ_HELP)
             return
 
+        if _is_health_workflow_name(sub):
+            yield event.plain_result("健康查询仅保留给插件内部、Plugin Pages 和定时监控使用，不开放 /ncqq 外部查询。")
+            return
+
         request = workflow_from_cli(sub, args)
         if request is None:
             yield event.plain_result(
@@ -297,7 +327,7 @@ class NCQQManagerPlugin(
 
     def _is_health_workflow_request(self, request) -> bool:
         workflow = _tool_key(request.workflow)
-        if workflow in _NCQQ_HEALTH_WORKFLOWS:
+        if _is_health_workflow_name(workflow):
             return True
         if workflow != "query":
             return False

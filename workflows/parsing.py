@@ -184,16 +184,9 @@ def workflow_from_cli(sub: str, args: str = "") -> WorkflowRequest | None:
     elif workflow in {
         "list_instances",
         "check_backends",
-        "check_manager",
-        "check_botshepherd",
-        "check_bot_runtime",
         "inspect_resources",
     }:
         target = ""
-    elif workflow == "check_health":
-        target = ""
-        lowered = {p.lower() for p in parts}
-        params["details"] = bool(lowered & {"detail", "details", "verbose", "详细", "详情"})
     elif workflow == "read_bot_messages":
         target = parts[0] if parts else ""
         params["limit"] = parts[1] if len(parts) > 1 else "20"

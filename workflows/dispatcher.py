@@ -13,10 +13,6 @@ from astrbot.api.all import AstrMessageEvent
 from ..core.monitoring import do_get_radar_endpoints
 from .admin_flows import (
     _run_audit_operations,
-    _run_check_bot_runtime,
-    _run_check_botshepherd,
-    _run_check_health,
-    _run_check_manager,
     _run_inspect_resources,
     _run_read_bot_messages,
     _run_read_instance_config,
@@ -30,7 +26,7 @@ from .instance_flows import (
     _run_delete_instance,
     _run_relogin_instance,
 )
-from .models import COMPILED_WORKFLOWS, WorkflowRequest, _DETAIL_HEALTH_WORKFLOWS
+from .models import COMPILED_WORKFLOWS, WorkflowRequest
 from .parsing import (
     _first_text,
     _normalize_approval_action,
@@ -176,9 +172,6 @@ async def run_ncqq_workflow(
     if route_error:
         yield event.plain_result(route_error)
         return
-    if request.workflow in _DETAIL_HEALTH_WORKFLOWS:
-        request.workflow = "check_health"
-        request.params["details"] = True
     spec = COMPILED_WORKFLOWS.get(request.workflow)
     if spec is None:
         yield event.plain_result("未知 ncqq workflow。\n" + _format_workflow_list())
@@ -231,26 +224,6 @@ async def run_ncqq_workflow(
     if request.workflow == "check_backends":
         endpoints = await do_get_radar_endpoints(plugin.client_for_manager(request.manager_id))
         yield event.plain_result(_format_backend_list(endpoints))
-        return
-
-    if request.workflow == "check_health":
-        async for item in _run_check_health(plugin, event, request):
-            yield item
-        return
-
-    if request.workflow == "check_manager":
-        async for item in _run_check_manager(plugin, event, request.manager_id):
-            yield item
-        return
-
-    if request.workflow == "check_botshepherd":
-        async for item in _run_check_botshepherd(plugin, event, request.manager_id):
-            yield item
-        return
-
-    if request.workflow == "check_bot_runtime":
-        async for item in _run_check_bot_runtime(plugin, event, request.manager_id):
-            yield item
         return
 
     if request.workflow == "read_bot_messages":
