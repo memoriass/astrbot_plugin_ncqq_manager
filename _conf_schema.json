@@ -1,25 +1,51 @@
 {
-    "manager_url": {
-        "title": "管理器地址",
-        "type": "string",
-        "description": "ncqq-manager 的后台地址，例如 http://localhost:8080"
-    },
-    "api_key": {
-        "title": "API Key",
-        "type": "string",
-        "description": "管理器的 API Key"
-    },
     "default_manager": {
         "title": "默认管理器 ID",
         "type": "string",
-        "description": "多 ncqq-manager 面板配置时的默认面板 ID。未配置多面板时，旧 manager_url/api_key 会作为该 ID 对应的面板。",
-        "default": "default"
+        "description": "未显式指定 manager 时使用的面板 ID，应匹配下方管理器面板列表中的某一项。",
+        "default": "local"
     },
     "manager_profiles": {
-        "title": "多管理器配置 JSON",
-        "type": "string",
-        "description": "可选。JSON 数组，每项包含 id、name、manager_url、api_key。用于同时管理本地和云端 ncqq-manager 面板。留空时使用上方单面板配置。",
-        "default": ""
+        "title": "管理器面板列表",
+        "type": "template_list",
+        "description": "配置一个或多个 ncqq-manager 面板。聊天或命令中可使用 manager=面板ID 或 面板ID/实例名 指定目标。",
+        "default": [],
+        "templates": {
+            "ncqq_manager": {
+                "name": "ncqq-manager 面板",
+                "hint": "添加一个可管理的 ncqq-manager 控制面板。",
+                "display_item": "name",
+                "hide_hint_in_list": true,
+                "items": {
+                    "id": {
+                        "description": "面板 ID",
+                        "type": "string",
+                        "hint": "用于 manager=local 或 local/实例名；建议只使用字母、数字、-、_。",
+                        "default": ""
+                    },
+                    "name": {
+                        "description": "显示名称",
+                        "type": "string",
+                        "hint": "用于 WebUI 和聊天返回中展示，例如 本地面板、云端面板。",
+                        "default": ""
+                    },
+                    "manager_url": {
+                        "description": "管理器地址",
+                        "type": "string",
+                        "hint": "ncqq-manager 后台地址，例如 http://127.0.0.1:8080。",
+                        "default": ""
+                    },
+                    "api_key": {
+                        "description": "API Key",
+                        "type": "string",
+                        "hint": "ncqq-manager API Key。不要把真实 key 写入仓库文档或测试记录。",
+                        "default": "",
+                        "password": true,
+                        "render_type": "password"
+                    }
+                }
+            }
+        }
     },
     "qrcode_private": {
         "title": "二维码私聊发送",
@@ -56,5 +82,11 @@
         "type": "int",
         "description": "实例健康检测的轮询间隔，单位分钟。建议 3~10 分钟。",
         "default": 5
+    },
+    "dashboard_stream_threshold": {
+        "title": "面板直出卡片上限",
+        "type": "int",
+        "description": "Plugin Pages 首页直出卡片数量上限（后端节点卡 + 绑定 + 审批）。超过后启用三排横向瀑布流。建议 7~10。",
+        "default": 10
     }
 }

@@ -4,25 +4,25 @@
 
 ## 配置模型
 
-旧单面板配置继续可用，多面板使用 `_conf_schema.json` 中的 `manager_profiles` JSON 文本。`default_manager` 控制未显式指定时使用的面板。配置字段和示例见 [configuration.md](configuration.md)。
+面板配置统一使用 `_conf_schema.json` 中的 `manager_profiles` 模板列表。`default_manager` 控制未显式指定时使用的面板。配置字段和示例见 [configuration.md](configuration.md)。
 
 ## Manager ID
 
 - ID 会被规范化为小写。
 - 只保留字母、数字、`-`、`_`，其他字符替换为 `-`。
-- 空 ID 回退到 `default_manager`。
+- 空 ID 会生成 `manager-序号`，实际配置时应显式填写稳定 ID。
 - 未知 ID 必须报错，不允许静默回退默认面板。
 
 ## Client 生命周期
 
 `core/client.py` 中的 `NCQQClientRegistry` 负责：
 
-- 解析旧配置和 `manager_profiles`。
+- 解析 `manager_profiles` 模板列表。
 - 按 manager ID 懒加载 `NCQQClient`。
 - 为每个 manager 复用独立 `aiohttp.ClientSession`。
 - 插件卸载时关闭所有已创建 client。
 
-业务代码必须通过 `plugin.client_for_manager(manager_id)` 获取 client。`plugin.client` 仅保留为默认面板兼容入口。
+业务代码必须通过 `plugin.client_for_manager(manager_id)` 获取 client。`plugin.client` 仅作为默认面板便捷入口。
 
 ## 实例引用
 

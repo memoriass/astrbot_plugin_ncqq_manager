@@ -25,7 +25,7 @@ from .workflows import run_ncqq_workflow, workflow_from_cli, workflow_from_tool
     "ncqq_manager",
     "memoriass",
     "NapCatQQ 容器控制与后端路由插件",
-    "2.1.0",
+    "2.2.0-beta.1",
     "https://github.com/memoriass/astrbot_plugin_ncqq_manager",
 )
 class NCQQManagerPlugin(

@@ -32,57 +32,34 @@ def _parse_manager_profiles(config: dict[str, Any]) -> tuple[list[ManagerProfile
     raw = config.get("manager_profiles")
     profiles: list[ManagerProfile] = []
 
-    if isinstance(raw, str) and raw.strip():
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError:
-            logger.warning("manager_profiles 不是合法 JSON，将回退单面板配置。")
-            payload = None
+    if isinstance(raw, list):
+        items = [item for item in raw if isinstance(item, dict)]
     else:
-        payload = raw
-
-    if isinstance(payload, dict):
-        items = []
-        for key, value in payload.items():
-            if isinstance(value, dict):
-                item = dict(value)
-                item.setdefault("id", key)
-                items.append(item)
-    elif isinstance(payload, list):
-        items = [item for item in payload if isinstance(item, dict)]
-    else:
+        if raw:
+            logger.warning(
+                "manager_profiles 应为 AstrBot template_list 列表，请在插件配置页重新保存。"
+            )
         items = []
 
+    default_id = _clean_manager_id(config.get("default_manager"), default="local")
     seen: set[str] = set()
     for index, item in enumerate(items, start=1):
-        manager_id = _clean_manager_id(item.get("id"), default=f"manager-{index}")
-        if manager_id in seen:
-            continue
-        seen.add(manager_id)
         url = str(item.get("manager_url") or item.get("url") or "").strip().rstrip("/")
         api_key = str(item.get("api_key") or item.get("key") or "").strip()
-        name = str(item.get("name") or item.get("display_name") or manager_id).strip()
+        name = str(item.get("name") or item.get("display_name") or "").strip()
+        if not any((str(item.get("id") or "").strip(), name, url, api_key)):
+            continue
+        manager_id = _clean_manager_id(item.get("id"), default=f"manager-{index}")
+        if manager_id in seen:
+            logger.warning("重复的 ncqq-manager 面板 ID 已跳过：%s", manager_id)
+            continue
+        seen.add(manager_id)
+        name = name or manager_id
         profiles.append(ManagerProfile(manager_id, name, url, api_key))
 
-    legacy_url = str(config.get("manager_url") or "").strip().rstrip("/")
-    legacy_key = str(config.get("api_key") or "").strip()
-    legacy_id = _clean_manager_id(config.get("default_manager"), default="default")
-    if legacy_url or legacy_key:
-        if legacy_id not in seen:
-            profiles.insert(
-                0,
-                ManagerProfile(
-                    legacy_id,
-                    str(config.get("manager_name") or legacy_id),
-                    legacy_url,
-                    legacy_key,
-                ),
-            )
-
     if not profiles:
-        profiles.append(ManagerProfile("default", "default", legacy_url, legacy_key))
+        profiles.append(ManagerProfile(default_id, default_id, "", ""))
 
-    default_id = _clean_manager_id(config.get("default_manager"), default=profiles[0].id)
     if default_id not in {item.id for item in profiles}:
         default_id = profiles[0].id
     return profiles, default_id

@@ -5,34 +5,35 @@ import time
 from typing import Any
 
 from astrbot.api import logger
-from astrbot.api.web import error_response, json_response, request
+from quart import g, jsonify, request
 
 from ..core.approval import claim_approval, list_approvals
 from ..workflows.common import _container_name, _is_running, _list_containers, _manager_get
 
-PLUGIN_ROUTE_PREFIX = "/astrbot_plugin_ncqq_manager"
+PLUGIN_ROUTE_PREFIXES = ("/ncqq_manager", "/astrbot_plugin_ncqq_manager")
 
 
 class PageApiMixin:
     def register_page_apis(self) -> None:
-        self.context.register_web_api(
-            f"{PLUGIN_ROUTE_PREFIX}/dashboard/summary",
-            self.page_dashboard_summary,
-            ["GET"],
-            "ncqq dashboard summary",
-        )
-        self.context.register_web_api(
-            f"{PLUGIN_ROUTE_PREFIX}/approvals/<approval_id>/approve",
-            self.page_approval_approve,
-            ["POST"],
-            "approve ncqq pending approval",
-        )
-        self.context.register_web_api(
-            f"{PLUGIN_ROUTE_PREFIX}/approvals/<approval_id>/reject",
-            self.page_approval_reject,
-            ["POST"],
-            "reject ncqq pending approval",
-        )
+        for prefix in PLUGIN_ROUTE_PREFIXES:
+            self.context.register_web_api(
+                f"{prefix}/dashboard/summary",
+                self.page_dashboard_summary,
+                ["GET"],
+                "ncqq dashboard summary",
+            )
+            self.context.register_web_api(
+                f"{prefix}/approvals/<approval_id>/approve",
+                self.page_approval_approve,
+                ["POST"],
+                "approve ncqq pending approval",
+            )
+            self.context.register_web_api(
+                f"{prefix}/approvals/<approval_id>/reject",
+                self.page_approval_reject,
+                ["POST"],
+                "reject ncqq pending approval",
+            )
 
     async def page_dashboard_summary(self):
         managers = await asyncio.gather(
@@ -41,23 +42,28 @@ class PageApiMixin:
         data = {
             "generated_at": time.time(),
             "default_manager": self.default_manager_id(),
+            "dashboard": {
+                "stream_threshold": _page_int_config(
+                    self.config.get("dashboard_stream_threshold"), 10, 4, 30
+                )
+            },
             "managers": list(managers),
             "approvals": await self._page_approvals(),
             "bindings": await self._page_bindings(),
             "health_snapshot": await self._page_health_snapshot(),
         }
-        return json_response(data)
+        return _json_response(data)
 
     async def page_approval_approve(self, approval_id: str):
         aid = str(approval_id or "").strip().upper()
         if not aid:
-            return error_response("missing approval_id", status_code=400)
+            return _error_response("missing approval_id", status_code=400)
         record = await claim_approval(self, aid)
         if not record:
-            return error_response("approval not found or expired", status_code=404)
+            return _error_response("approval not found or expired", status_code=404)
         result = await self._dispatch_approved_action(record["action"], record["params"])
         logger.info("Dashboard approved ncqq approval %s by %s", aid, _page_username())
-        return json_response(
+        return _json_response(
             {
                 "approval_id": aid,
                 "status": "approved",
@@ -69,14 +75,14 @@ class PageApiMixin:
     async def page_approval_reject(self, approval_id: str):
         aid = str(approval_id or "").strip().upper()
         if not aid:
-            return error_response("missing approval_id", status_code=400)
-        payload = await request.json(default={})
+            return _error_response("missing approval_id", status_code=400)
+        payload = await _request_json()
         reason = str(payload.get("reason") or "").strip() if isinstance(payload, dict) else ""
         record = await claim_approval(self, aid)
         if not record:
-            return error_response("approval not found or expired", status_code=404)
+            return _error_response("approval not found or expired", status_code=404)
         logger.info("Dashboard rejected ncqq approval %s by %s", aid, _page_username())
-        return json_response(
+        return _json_response(
             {
                 "approval_id": aid,
                 "status": "rejected",
@@ -169,7 +175,35 @@ class PageApiMixin:
 
 
 def _page_username() -> str:
-    return str(getattr(request, "username", "") or "-")
+    return str(getattr(g, "username", "") or "-")
+
+
+async def _request_json() -> dict[str, Any]:
+    try:
+        payload = await request.get_json(silent=True)
+    except TypeError:
+        payload = await request.get_json()
+    except Exception:
+        payload = {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _json_response(data: dict[str, Any], status_code: int = 200):
+    response = jsonify(data)
+    response.status_code = status_code
+    return response
+
+
+def _error_response(message: str, status_code: int = 400):
+    return _json_response({"status": "error", "message": message}, status_code=status_code)
+
+
+def _page_int_config(value: Any, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
 
 
 def _page_health(result: Any) -> dict[str, Any]:

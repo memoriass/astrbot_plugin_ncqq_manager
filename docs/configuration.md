@@ -4,34 +4,38 @@
 
 ## Manager 配置
 
-单面板配置：
+面板配置统一使用 `manager_profiles`。它在 AstrBot WebUI 中渲染为可增删的模板列表，每个条目代表一个 ncqq-manager 控制面板。
 
 | 配置项 | 类型 | 说明 |
 | --- | --- | --- |
-| `manager_url` | `string` | ncqq-manager 后端地址，例如 `http://127.0.0.1:8080`。 |
-| `api_key` | `string` | ncqq-manager API key。 |
-| `default_manager` | `string` | 默认 manager ID。单面板可保持 `default`。 |
+| `default_manager` | `string` | 默认 manager ID，应匹配 `manager_profiles` 中的某个 `id`。 |
+| `manager_profiles` | `template_list` | ncqq-manager 面板列表，每项包含 `id`、`name`、`manager_url`、`api_key`。 |
 
-多面板配置使用 `manager_profiles`，值为 JSON 文本：
+保存后的配置结构类似：
 
 ```json
-[
-  {
-    "id": "local",
-    "name": "本地面板",
-    "manager_url": "http://127.0.0.1:8080",
-    "api_key": "..."
-  },
-  {
-    "id": "cloud",
-    "name": "云端面板",
-    "manager_url": "https://example.com",
-    "api_key": "..."
-  }
-]
+{
+  "default_manager": "local",
+  "manager_profiles": [
+    {
+      "__template_key": "ncqq_manager",
+      "id": "local",
+      "name": "本地面板",
+      "manager_url": "http://127.0.0.1:8080",
+      "api_key": "..."
+    },
+    {
+      "__template_key": "ncqq_manager",
+      "id": "cloud",
+      "name": "云端面板",
+      "manager_url": "https://example.com",
+      "api_key": "..."
+    }
+  ]
+}
 ```
 
-若 `manager_profiles` 留空，插件使用 `manager_url` / `api_key` 作为旧单面板配置。若同时配置旧字段和多面板列表，旧字段会作为 `default_manager` 对应的 profile 保留。
+`id` 会被规范化为小写，只保留字母、数字、`-`、`_`；建议显式填写稳定 ID。聊天或调试命令中可写 `manager=cloud`，也可把实例写成 `cloud/mybot`。
 
 ## 二维码配置
 

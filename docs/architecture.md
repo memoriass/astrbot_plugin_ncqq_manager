@@ -28,7 +28,7 @@
 
 ## 多 Manager 模型
 
-插件支持多个 ncqq-manager 面板。旧的 `manager_url` / `api_key` 仍作为单面板配置使用；配置 `manager_profiles` JSON 文本后，每个面板以稳定 `manager_id` 管理独立 HTTP session。
+插件支持多个 ncqq-manager 面板。配置入口统一为 `_conf_schema.json` 中的 `manager_profiles` 模板列表，每个面板以稳定 `manager_id` 管理独立 HTTP session。
 
 命名规则：
 

@@ -27,20 +27,21 @@ body::before {
 }
 
 body::after {
-  right: -10vw;
-  top: 2vh;
+  right: 2vw;
+  top: 8vh;
   z-index: 0;
-  width: 78vw;
-  height: 78vh;
-  border-radius: 44% 24% 38% 26%;
+  width: 72vw;
+  height: 64vh;
+  border-radius: 54% 22% 44% 28%;
   background:
-    radial-gradient(circle at 44% 8%, rgb(98 126 86 / 32%) 0 6%, transparent 18%),
-    radial-gradient(circle at 34% 56%, rgb(20 24 23 / 46%) 0 20%, transparent 48%),
-    radial-gradient(circle at 72% 44%, rgb(124 133 127 / 42%) 0 23%, transparent 50%),
-    linear-gradient(135deg, rgb(236 239 235 / 82%), rgb(85 94 90 / 46) 52%, rgb(248 249 247 / 72));
-  filter: saturate(0.86) contrast(0.92);
-  opacity: 0.9;
-  transform: rotate(-4deg);
+    radial-gradient(ellipse at 44% 3%, rgb(99 130 83 / 50%) 0 5%, transparent 16%),
+    radial-gradient(ellipse at 55% 0%, rgb(142 164 121 / 38%) 0 8%, transparent 19%),
+    radial-gradient(ellipse at 37% 54%, rgb(20 23 22 / 54%) 0 18%, transparent 46%),
+    radial-gradient(ellipse at 70% 46%, rgb(103 111 106 / 50%) 0 22%, transparent 52%),
+    linear-gradient(135deg, rgb(239 241 238 / 86%), rgb(80 88 84 / 54) 54%, rgb(247 248 246 / 78));
+  filter: saturate(0.88) contrast(0.98);
+  opacity: 0.94;
+  transform: rotate(-3deg);
 }
 
 .app-frame {
@@ -59,8 +60,8 @@ body::after {
   height: 100vh;
   display: grid;
   grid-template-rows: auto 1fr auto;
-  gap: 18px;
-  padding: 16px 10px;
+  gap: 22px;
+  padding: 16px 7px;
   border-right: 1px solid rgb(22 30 38 / 12%);
   background:
     radial-gradient(circle, rgb(24 35 43 / 10%) 1px, transparent 1px),
@@ -113,7 +114,7 @@ body::after {
   z-index: 1;
   display: grid;
   align-content: start;
-  gap: 8px;
+  gap: 4px;
   overflow: visible;
   margin: 0;
   padding: 0;
@@ -123,7 +124,7 @@ body::after {
 .tab-button {
   position: relative;
   min-width: 0;
-  min-height: 74px;
+  min-height: 68px;
   display: grid;
   place-items: center;
   gap: 3px;
@@ -149,7 +150,7 @@ body::after {
 }
 
 .tab-button.active {
-  background: rgb(255 255 255 / 68%);
+  background: transparent;
   color: var(--text);
   box-shadow: none;
 }
@@ -177,22 +178,48 @@ body::after {
 .view-shell {
   position: relative;
   min-width: 0;
-  padding: 34px 42px;
+  min-height: 100vh;
+  display: grid;
+  align-items: start;
+  padding: 50px 42px 34px;
 }
 
 .view-panel.active {
   position: relative;
   z-index: 1;
-  width: min(1080px, 100%);
-  min-height: calc(100vh - 108px);
+  width: min(960px, 100%);
+  min-height: 0;
   margin: 0 auto;
-  padding: 26px;
-  border: 1px solid rgb(24 35 43 / 10%);
-  border-radius: 8px;
-  background: rgb(255 255 255 / 91%);
+  padding: 24px 26px;
+  border: 1px solid rgb(24 35 43 / 9%);
+  border-radius: 9px;
+  background: rgb(255 255 255 / 94%);
   box-shadow:
-    0 22px 52px rgb(20 28 35 / 16%),
-    inset 0 1px 0 rgb(255 255 255 / 92%);
+    0 18px 38px rgb(20 28 35 / 14%),
+    0 1px 0 rgb(255 255 255 / 88%) inset;
+}
+
+.view-panel.active::before,
+.view-panel.active::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+.view-panel.active::before {
+  top: 14px;
+  left: 18px;
+  width: min(360px, 42%);
+  height: 1px;
+  background: linear-gradient(90deg, rgb(24 35 43 / 18%), transparent);
+}
+
+.view-panel.active::after {
+  right: 18px;
+  bottom: 14px;
+  width: 86px;
+  height: 1px;
+  background: linear-gradient(270deg, rgb(24 35 43 / 18%), transparent);
 }
 
 .section-head h2 {
@@ -209,10 +236,12 @@ body::after {
 .sub-panel {
   position: sticky;
   top: 18px;
+  max-height: min(560px, calc(100vh - 150px));
   min-width: 0;
   display: grid;
   align-content: start;
   gap: 18px;
+  overflow-y: auto;
   padding: 0 18px 0 0;
   border: 0;
   border-right: 1px solid rgb(24 35 43 / 10%);
@@ -267,7 +296,7 @@ body::after {
 
 .instance-filter button,
 .instance-switch button {
-  min-height: 54px;
+  min-height: 44px;
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 10px;
@@ -284,7 +313,7 @@ body::after {
 .instance-filter button strong,
 .instance-switch button strong {
   color: var(--text);
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1;
 }
 
