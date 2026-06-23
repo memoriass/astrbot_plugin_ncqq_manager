@@ -153,11 +153,7 @@ def workflow_from_cli(sub: str, args: str = "") -> WorkflowRequest | None:
         params["scope"] = parts[0] if parts else ""
         target = parts[1] if len(parts) > 1 else ""
         scope_key = _canonical_key(str(params["scope"]))
-        if scope_key in {"health", "manager", "botshepherd", "runtime", "健康"}:
-            lowered = {p.lower() for p in parts[1:]}
-            params["details"] = bool(lowered & {"detail", "details", "verbose", "详细", "详情"})
-            target = ""
-        elif scope_key in {"messages", "message", "消息"}:
+        if scope_key in {"messages", "message", "消息"}:
             params["limit"] = parts[2] if len(parts) > 2 else "20"
         elif scope_key in {"audit", "operations", "审计"}:
             params["limit"] = parts[1] if len(parts) > 1 else "10"

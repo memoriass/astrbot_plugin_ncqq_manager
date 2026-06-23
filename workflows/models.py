@@ -32,7 +32,7 @@ COMPILED_WORKFLOWS: dict[str, CompiledWorkflow] = {
     "query": CompiledWorkflow(
         workflow="query",
         title="查询主流程",
-        purpose="按 scope 查询实例、后端、健康、消息、审计、资源或配置。",
+        purpose="按 scope 查询实例、后端、消息、审计、资源或配置。",
     ),
     "manage_backend": CompiledWorkflow(
         workflow="manage_backend",

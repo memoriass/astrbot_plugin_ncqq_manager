@@ -7,13 +7,13 @@
 | workflow | 能力方向 | 说明 |
 | --- | --- | --- |
 | `manage_instance` | 实例主流程 | 根据 `intent` 路由到创建、重登、控制、接后端、检测、列表、销毁。 |
-| `query` | 查询主流程 | 根据 `scope` 路由到实例、后端、健康、消息、审计、资源、配置查询。 |
+| `query` | 查询主流程 | 根据 `scope` 路由到 ncqq 实例、后端、消息、审计、资源、配置查询。 |
 | `manage_backend` | 后端主流程 | 根据 `intent` 查看后端端点或接入后端。 |
 | `review_approvals` | 审批队列流程 | 管理员查看、批准或驳回待审批请求。 |
 
 ## 细分 Workflow
 
-细分入口可直接调用，但聊天场景优先选择主 workflow。
+细分入口可直接调用，但聊天场景优先选择主 workflow；健康类细分入口只供内部代码、Plugin Pages 和定时监控使用。
 
 | workflow | 来源 | 说明 |
 | --- | --- | --- |
@@ -24,7 +24,7 @@
 | `check_instance` | `query scope=instance` | 检测实例存在、登录、资源、日志和可选配置。 |
 | `list_instances` | `query scope=instances` | 查看实例状态和绑定关系。 |
 | `check_backends` | `query scope=backends` | 查看后端端点，不展示 token 明文。 |
-| `check_health` | `query scope=health` | 聚合 manager、BotShepherd、Bot runtime、实例和后端状态。 |
+| `check_health` | 内部使用 | 聚合 ncqq-manager、BotShepherd、Bot runtime、实例和后端状态；不开放给自然语言工具或 `/ncqq` 外部命令。 |
 | `read_bot_messages` | `query scope=messages` | 管理员读取指定 Bot 最近消息缓存。 |
 | `audit_operations` | `query scope=audit` | 管理员读取最近操作日志。 |
 | `inspect_resources` | `query scope=resources` | 管理员查看镜像和节点资产。 |
@@ -42,8 +42,6 @@
 | 实例有什么问题、看日志、资源占用 | `query`，`scope=instance` |
 | 有哪些实例、当前状态 | `query`，`scope=instances` |
 | 有哪些后端端点 | `query`，`scope=backends` |
-| 整体健康、当前是否正常 | `query`，`scope=health` |
-| 管理器、Docker、BotShepherd、Bot 连接细节 | `query`，`scope=health`，`details=true` |
 | 看某个 Bot 最近消息 | `query`，`scope=messages` |
 | 谁操作过、最近变更 | `query`，`scope=audit` |
 | 有哪些镜像或节点资源 | `query`，`scope=resources` |
@@ -71,7 +69,6 @@
 
 ```text
 /ncqq manage_instance control restart cloud/mybot
-/ncqq query health manager=cloud detail
 /ncqq manage_backend connect astrbot cloud/mybot
 ```
 
@@ -88,7 +85,6 @@ ncqq connect_backend <端点别名> [实例]
 ncqq check_instance [实例]
 ncqq list_instances
 ncqq check_backends
-ncqq check_health [detail]
 ncqq read_bot_messages <实例> [条数]
 ncqq audit_operations [条数]
 ncqq inspect_resources

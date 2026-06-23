@@ -9,7 +9,7 @@ OneBot v11 群聊消息应使用数组格式：
 ```json
 [
   {"type": "at", "data": {"qq": "123456"}},
-  {"type": "text", "data": {"text": " ncqq 当前健康状态怎么样？"}}
+  {"type": "text", "data": {"text": " ncqq 当前有哪些实例？"}}
 ]
 ```
 
@@ -19,14 +19,14 @@ OneBot v11 群聊消息应使用数组格式：
 
 1. 原始文本显式以唤醒前缀调用 `/ncqq` 时，进入调试命令入口。
 2. 群内 `@bot ncqq ...` 是自然语言请求，不进入 `/ncqq` 调试命令，由 AstrBot LLM 判断是否调用 `ncqq_manager`。
-3. 询问整体健康、管理器状态、实例状态、后端状态时，优先调用 `workflow=query`。
+3. 询问实例状态、后端端点、消息、审计、资源或配置时，优先调用 `workflow=query`。
 4. 普通聊天未提到 ncqq、NapCatQQ、实例、后端、管理器、BotShepherd 等管理语义时，不应调用本插件工具。
 
 示例：
 
 ```text
-/ncqq query health detail
-@bot ncqq 当前健康状态怎么样
+/ncqq query instances
+@bot ncqq 当前有哪些实例
 @bot 帮我重启 cloud/mybot
 ```
 
@@ -58,7 +58,7 @@ OneBot v11 群聊消息应使用数组格式：
 
 ```text
 重启 cloud/mybot
-查询 cloud 面板健康
+查询 cloud 面板实例
 把 astrbot 后端接到 local/mybot
 ```
 

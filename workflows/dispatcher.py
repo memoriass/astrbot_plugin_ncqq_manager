@@ -33,7 +33,6 @@ from .instance_flows import (
 from .models import COMPILED_WORKFLOWS, WorkflowRequest, _DETAIL_HEALTH_WORKFLOWS
 from .parsing import (
     _first_text,
-    _get_bool,
     _normalize_approval_action,
     _normalize_action,
     _normalize_workflow,
@@ -90,11 +89,6 @@ _QUERY_SCOPES = {
     "backend": "check_backends",
     "endpoints": "check_backends",
     "后端": "check_backends",
-    "health": "check_health",
-    "manager": "check_health",
-    "botshepherd": "check_health",
-    "runtime": "check_health",
-    "健康": "check_health",
     "messages": "read_bot_messages",
     "message": "read_bot_messages",
     "消息": "read_bot_messages",
@@ -159,12 +153,8 @@ def _route_query_workflow(request: WorkflowRequest) -> str:
     scope = _normalize_workflow(_first_text(request.params, "scope", "intent", "type"))
     routed = _QUERY_SCOPES.get(scope)
     if routed is None:
-        return "查询主流程需要 scope=instances/backends/health/instance/messages/audit/resources/config。"
+        return "查询主流程需要 scope=instances/backends/instance/messages/audit/resources/config。"
     request.workflow = routed
-    if scope in {"manager", "botshepherd", "runtime"}:
-        request.params["details"] = True
-    if routed == "check_health" and _get_bool(request.params, "detail", "details", default=False):
-        request.params["details"] = True
     return ""
 
 

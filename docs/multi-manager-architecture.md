@@ -36,7 +36,7 @@
 聊天入口支持两种写法：
 
 ```text
-/ncqq query health manager=cloud detail
+/ncqq query instances manager=cloud
 /ncqq manage_instance control restart cloud/foo
 ```
 

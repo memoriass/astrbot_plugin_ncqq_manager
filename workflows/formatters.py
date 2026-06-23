@@ -24,7 +24,7 @@ def _format_workflow_list() -> str:
         lines.append(f"- {item.workflow}: {item.title}{suffix} - {item.purpose}")
     lines.append("每个 workflow 只覆盖一个能力方向；底层 API 调用作为流程内部步骤。")
     lines.append("聊天场景优先使用主流程；细分 workflow 仍可直接调用但默认不展示。")
-    lines.append("查询类统一走 query；需要细分诊断时使用 scope=health details=true。")
+    lines.append("查询类统一走 query；健康检查仅供内部代码、Plugin Pages 和定时监控使用。")
     return "\n".join(lines)
 
 def _format_container_brief(item: dict[str, Any]) -> str:

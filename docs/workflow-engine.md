@@ -21,9 +21,11 @@
 | workflow | 路由参数 | 目标 |
 | --- | --- | --- |
 | `manage_instance` | `intent=create/recover/control/connect/check/list/delete` | 实例相关主入口。 |
-| `query` | `scope=instances/backends/health/instance/messages/audit/resources/config` | 查询类主入口。 |
+| `query` | `scope=instances/backends/instance/messages/audit/resources/config` | 查询类主入口。 |
 | `manage_backend` | `intent=list/check/connect` | 后端端点主入口。 |
 | `review_approvals` | `action=list/approve/reject` | 审批主入口。 |
+
+健康聚合不属于公开 `query` 范围；`check_health` 和细分健康 workflow 只供内部代码、Plugin Pages 和定时监控使用。
 
 ## 多面板约定
 

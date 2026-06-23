@@ -21,6 +21,19 @@ from .tools.page_api import PageApiMixin
 from .workflows import run_ncqq_workflow, workflow_from_cli, workflow_from_tool
 
 
+_NCQQ_HEALTH_WORKFLOWS = {
+    "check_health",
+    "check_manager",
+    "check_botshepherd",
+    "check_bot_runtime",
+}
+_NCQQ_HEALTH_QUERY_SCOPES = {"health", "manager", "botshepherd", "runtime"}
+
+
+def _tool_key(value: object) -> str:
+    return str(value or "").strip().lower().replace("-", "_")
+
+
 @register(
     "ncqq_manager",
     "memoriass",
@@ -110,7 +123,12 @@ class NCQQManagerPlugin(
     ):
         """Run a compiled internal ncqq workflow.
 
-        Use this tool only for ncqq / NapCatQQ instance and backend management.
+        Use this tool only when the user explicitly asks about ncqq, NapCatQQ,
+        ncqq-manager, BotShepherd, OneBot, a configured ncqq-manager panel, or a
+        bound NapCatQQ instance. Health checks are not exposed through this
+        natural-language tool; they are reserved for internal plugin code,
+        Plugin Pages, and scheduled monitoring.
+
         The model must choose one workflow scenario and fill slots; the plugin
         performs permission checks, target resolution, backend alias validation,
         approval routing, and API calls internally.
@@ -119,15 +137,19 @@ class NCQQManagerPlugin(
             manage_instance - instance main flow. Use params.intent=create,
                 recover, control, connect, check, list, or delete. It routes to
                 the specific instance workflow internally.
-            query - read-only main flow. Use params.scope=instances, backends,
-                health, instance, messages, audit, resources, or config.
+            query - read-only main flow for ncqq/NapCatQQ only. Use
+                params.scope=instances, backends, instance, messages, audit,
+                resources, or config. Health scopes are not exposed through
+                this LLM tool.
             manage_backend - backend main flow. Use params.intent=list/check or
                 connect.
             review_approvals - admin-only pending approval list/approve/reject.
 
-        Specific workflows such as create_instance, relogin_instance,
-        control_instance, connect_backend, check_health, and read_instance_config
-        remain directly callable when the model already knows the exact flow.
+        Specific non-health workflows such as create_instance, relogin_instance,
+        control_instance, connect_backend, and read_instance_config remain
+        directly callable when the model already knows the exact flow. Health
+        workflows remain registered for internal use, but LLM tool calls to
+        them are ignored.
 
         Args:
             workflow(string): One workflow scenario id from the list above.
@@ -138,7 +160,8 @@ class NCQQManagerPlugin(
             params(object): Optional JSON object. Common fields:
                 {"manager":"cloud"} selects a non-default ncqq-manager panel.
                 manage_instance: {"intent":"control","action":"restart"}
-                query: {"scope":"health","details":true}
+                query: {"scope":"instances"} or {"scope":"backends"} for
+                    read-only ncqq state. Do not use {"scope":"health"} here.
                 manage_backend: {"intent":"connect","backend_alias":"alias"}
                     The backend alias may also arrive as "backend" from LLMs.
                 delete_instance: {"confirm":true,"delete_data":false}
@@ -148,6 +171,9 @@ class NCQQManagerPlugin(
         if not self.is_response_group_allowed(event):
             return
         request = workflow_from_tool(workflow, target, params)
+        if self._is_health_workflow_request(request):
+            logger.debug("Ignored ncqq_manager health workflow from LLM tool call")
+            return
         async for r in run_ncqq_workflow(self, event, request):
             yield r
 
@@ -158,7 +184,7 @@ class NCQQManagerPlugin(
     _NCQQ_HELP = (
         "ncqq workflow 调试入口：\n"
         "ncqq manage_instance <intent> [args]   - 实例主流程：create/recover/control/connect/check/list/delete\n"
-        "ncqq query [scope] [target]            - 查询主流程：instances/backends/health/instance/messages/audit/resources/config\n"
+        "ncqq query [scope] [target]            - 查询主流程：instances/backends/instance/messages/audit/resources/config\n"
         "ncqq manage_backend [list|connect] ... - 后端主流程\n"
         "ncqq create_instance <实例> [端点别名] - 创建流程\n"
         "ncqq relogin_instance [实例]           - 掉线重登流程\n"
@@ -167,7 +193,6 @@ class NCQQManagerPlugin(
         "ncqq check_instance [实例]             - 实例检测流程，管理员限定\n"
         "ncqq list_instances                    - 实例列表流程\n"
         "ncqq check_backends                     - 后端端点检测流程\n"
-        "ncqq check_health [detail]              - 综合健康检查流程，管理员限定\n"
         "ncqq read_bot_messages <实例> [条数]   - Bot 消息读取流程，管理员限定\n"
         "ncqq audit_operations [条数]            - 操作审计流程，管理员限定\n"
         "ncqq inspect_resources                  - 资源检测流程，管理员限定\n"
@@ -207,6 +232,9 @@ class NCQQManagerPlugin(
             yield event.plain_result(
                 f"不支持的 ncqq workflow：{sub}。发送 /ncqq help 查看可用场景。"
             )
+            return
+        if self._is_health_workflow_request(request):
+            yield event.plain_result("健康查询仅保留给插件内部、Plugin Pages 和定时监控使用，不开放 /ncqq 外部查询。")
             return
 
         async for r in run_ncqq_workflow(self, event, request):
@@ -266,6 +294,19 @@ class NCQQManagerPlugin(
         if wrapped_event is not None and hasattr(wrapped_event, "get_sender_id"):
             return wrapped_event
         raise TypeError("ncqq_manager requires an AstrMessageEvent context")
+
+    def _is_health_workflow_request(self, request) -> bool:
+        workflow = _tool_key(request.workflow)
+        if workflow in _NCQQ_HEALTH_WORKFLOWS:
+            return True
+        if workflow != "query":
+            return False
+        scope = _tool_key(
+            request.params.get("scope")
+            or request.params.get("intent")
+            or request.params.get("type")
+        )
+        return scope in _NCQQ_HEALTH_QUERY_SCOPES
 
     def is_plugin_admin(self, event: AstrMessageEvent) -> bool:
         """Treat AstrBot role admins and configured admins_id as plugin admins."""
