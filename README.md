@@ -92,6 +92,7 @@ docs/                  架构与维护说明
 
 ```powershell
 python -X utf8 -m compileall main.py core tools workflows rendering
+python -X utf8 scripts/verify_release.py
 python -X utf8 -c "import json; json.load(open('_conf_schema.json', encoding='utf-8')); print('json ok')"
 python -X utf8 -c "import sys, pathlib; sys.path.insert(0, str(pathlib.Path('..').resolve())); import astrbot_plugin_ncqq_manager.main; print('import ok')"
 node --check pages/ncqq-dashboard/app.js
