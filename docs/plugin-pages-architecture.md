@@ -24,6 +24,7 @@
 
 - 一级为整屏破镜拼图式菜单，每个 ncqq-manager 面板一个主碎片，绑定和审批各一个主碎片。
 - 镜片视觉由 `assets/memory-shards-scene/*-scene-v14.png` 单片资源提供，HTML 按钮只作为透明热区。
+- JS 动态生成的插件内图片 URL 通过 `dashboard-utils.js` 的 `assetUrl()` 继承 AstrBot 注入的 `asset_token` 和 `theme`；静态 HTML/CSS 资源继续交给 AstrBot Page 服务自动重写。
 - 一级背景由 `assets/backgrounds/sora-shattered-star-bg-v7-generated-fill.png` 提供，玻璃层整体上移并保持轻微浮动；页面不再启用星河流动遮罩、A/C 背景试验或横向瀑布流。
 - 原始破镜整图保留在 `assets/memory-shards-generated-v2.png`，基础单片裁切位于 `assets/memory-shards/`，由 `manifest.json` 记录源图裁切框和百分比位置。
 - `assets/memory-shards-scene/manifest.json` 记录嵌入 ncqq/AstrBot 看板娘片段后的当前运行资源；scene-v14 保留完整玻璃底图，只裁已确认溢出的看板娘贴图区域，不做全局内缩。

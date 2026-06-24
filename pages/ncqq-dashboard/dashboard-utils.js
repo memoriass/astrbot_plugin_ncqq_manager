@@ -46,7 +46,20 @@
     return `<div class="empty${error ? " error" : ""}">${escapeHtml(text)}</div>`;
   }
 
+  function assetUrl(path) {
+    const url = new URL(path, window.location.href);
+    const pageParams = new URLSearchParams(window.location.search);
+    ["asset_token", "theme"].forEach((key) => {
+      const value = pageParams.get(key);
+      if (value && !url.searchParams.has(key)) {
+        url.searchParams.set(key, value);
+      }
+    });
+    return url.href;
+  }
+
   window.NcqqDashboardUtils = {
+    assetUrl,
     empty,
     escapeHtml,
     fmtAge,

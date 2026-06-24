@@ -1,6 +1,6 @@
 (function () {
   const utils = window.NcqqDashboardUtils;
-  const { empty, escapeHtml, fmtAge, instanceState, managerState, maskQQ, shortUrl } = utils;
+  const { assetUrl, empty, escapeHtml, fmtAge, instanceState, managerState, maskQQ, shortUrl } = utils;
   const mirrorSlotCount = 8;
   const mirrorSceneVersion = "memory-scene-v14-mapcrop6-manual-20260620";
   const mirrorAlertVersion = "memory-alert-edge-v17-manual-20260620";
@@ -52,7 +52,7 @@
     return mirrorShardFiles
       .map(
         (file, index) => `
-          <img class="memory-piece slot-${index + 1}" src="./assets/memory-shards-scene/${file}?v=${mirrorSceneVersion}" alt="" loading="eager" />
+          <img class="memory-piece slot-${index + 1}" src="${escapeHtml(assetUrl(`./assets/memory-shards-scene/${file}?v=${mirrorSceneVersion}`))}" alt="" loading="eager" />
         `,
       )
       .join("");
@@ -62,7 +62,7 @@
     const baseFile = mirrorShardFiles[slot - 1] || "";
     if (!baseFile) return "";
     const file = baseFile.replace("-scene-v14.png", `-alert-${tone}-v17.png`);
-    return `<img class="memory-edge-alert ${tone}" src="./assets/memory-shards-alert/${file}?v=${mirrorAlertVersion}" alt="" aria-hidden="true" loading="eager" />`;
+    return `<img class="memory-edge-alert ${tone}" src="${escapeHtml(assetUrl(`./assets/memory-shards-alert/${file}?v=${mirrorAlertVersion}`))}" alt="" aria-hidden="true" loading="eager" />`;
   }
 
   function renderMirrorDecor(slots) {

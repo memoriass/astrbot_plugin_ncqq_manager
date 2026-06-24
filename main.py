@@ -63,7 +63,7 @@ def _is_health_workflow_name(value: object) -> bool:
     "ncqq_manager",
     "memoriass",
     "NapCatQQ 容器控制与后端路由插件",
-    "2.2.0-beta.2",
+    "2.2.0-beta.3",
     "https://github.com/memoriass/astrbot_plugin_ncqq_manager",
 )
 class NCQQManagerPlugin(
