@@ -6,7 +6,7 @@
 
 | 目录 | 面向对象 | 说明 |
 | --- | --- | --- |
-| `core/` | 底层服务 | 多面板 HTTP 客户端、API 动作、监控查询、审批、健康检查。 |
+| `core/` | 底层服务 | 多面板 HTTP 客户端、API 动作、监控查询、审批、健康检查、掉线 POST 接收。 |
 | `tools/` | AstrBot 入口 | `main.py` 混入的工具能力，负责把 AstrBot 事件转到底层服务。 |
 | `workflows/` | 业务编排 | LLM 和 `/ncqq` 只选择 workflow，由这里串联底层服务。 |
 | `rendering/` | 图文渲染 | HTML 模板转图片和降级输出。 |
@@ -35,6 +35,7 @@
 | 新插件 Skill 包 | `skills/<skill_name>/SKILL.md`，并同步 `docs/astrbot-tools.md` |
 | 新 WebUI 页面 | `pages/<page_name>/index.html` 与 `tools/page_api.py` |
 | 新 HTML 图片输出 | `rendering/html_renderer.py` 与 `templates/` |
+| 新机器对机器回调入口 | `core/` 独立服务模块，并由 `main.py` 生命周期启动；不得注册为 LLM 工具 |
 | 新交接或结构说明 | `docs/` 下按架构功能命名的文档 |
 
 ## 稳定文档索引

@@ -124,3 +124,26 @@ flowchart TD
     I -- "是" --> J["发送群告警卡片"]
     I -- "否" --> K["只做私聊通知"]
 ```
+
+## ncqq-manager 掉线 POST 通知
+
+```mermaid
+flowchart TD
+    A["ncqq-manager plugin_api 规则 POST"] --> B["core/offline_webhook.py 独立接收器"]
+    B --> C{"token 是否有效"}
+    C -- "否" --> C1["返回 401"]
+    C -- "是" --> D["解析 event / instance / manager"]
+    D --> E{"event 类型"}
+    E -- "login_lost 或 instance_offline" --> F["写入 health_snapshot=false"]
+    E -- "instance_online 等恢复事件" --> G["写入 health_snapshot=true"]
+    F --> H{"是否为新状态边沿"}
+    G --> H
+    H -- "否" --> H1["返回 ok，不重复通知"]
+    H -- "是" --> I["复用 health_check 通知函数"]
+    I --> J["私聊 owner"]
+    I --> K{"是否配置 notify_group"}
+    K -- "是" --> L["发送群告警卡片"]
+    K -- "否" --> M["结束"]
+```
+
+该 HTTP 接收器不注册为 LLM 工具，也不注册为 Plugin Pages API。它只用于 ncqq-manager 的机器对机器 POST 回调；内部状态仍落到 `health_snapshot`，与定时轮询共享去重边界。

@@ -50,8 +50,28 @@
 | `enable_offline_notify` | `bool` | `true` | 启用定时掉线检测。 |
 | `health_check_interval` | `int` | `5` | 掉线检测间隔，单位分钟。 |
 | `notify_group` | `string` | 空 | 掉线和恢复通知推送群号；留空则不推送群通知。 |
+| `enable_alert_webhook` | `bool` | `false` | 启动独立 HTTP 接收器，接收 ncqq-manager `plugin_api` 规则发出的掉线 POST。 |
+| `alert_webhook_host` | `string` | `127.0.0.1` | POST 接收器监听地址。非 loopback 地址必须配置 token。 |
+| `alert_webhook_port` | `int` | `6198` | POST 接收器监听端口。 |
+| `alert_webhook_path` | `string` | `/ncqq-manager/alerts` | POST 接收路径。 |
+| `alert_webhook_token` | `string` | 空 | POST 接收鉴权 token，可通过 query `token`、`Authorization: Bearer` 或 `X-NCQQ-Webhook-Token` 传入。 |
 
 定时健康检查会遍历所有 configured manager。快照 key 使用 `manager/instance`，避免不同面板同名实例互相覆盖状态。
+
+ncqq-manager 的 API 兜底通知对接方式：
+
+1. 在插件配置中开启 `enable_alert_webhook`，设置监听地址、端口、路径和 token。
+2. 在 ncqq-manager 告警设置中创建 `plugin_api` 规则，`webhook_url` 填入插件接收地址，例如：
+
+```text
+http://127.0.0.1:6198/ncqq-manager/alerts?manager=local&token=...
+```
+
+3. 在对应 QQ 通知规则中启用 API 兜底开关。ncqq-manager 只会在匹配的 QQ 通知规则允许 API 兜底时发送 `plugin_api` POST。
+
+多 manager 场景建议在 URL query 中显式追加 `manager=<面板ID>`。`login_lost` payload 如包含 `dashboard_url`，插件也会尝试按 `manager_profiles[*].manager_url` 自动匹配；`instance_offline` payload 通常没有 dashboard 地址，因此应显式带 `manager`。
+
+若 ncqq-manager 侧 URL 指向 `127.0.0.1`、内网 IP 或 AstrBot 所在机器，需要在 ncqq-manager 中允许本地 webhook 地址。插件收到 POST 后会写入同一个 `health_snapshot`，后续定时轮询不会对同一离线边沿重复告警。
 
 ## 群聊白名单
 

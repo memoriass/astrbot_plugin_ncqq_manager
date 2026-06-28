@@ -12,6 +12,7 @@ from astrbot.core.star.star_tools import StarTools
 from .core.approval import claim_approval
 from .core.client import NCQQClientRegistry
 from .core.health_check import do_health_check
+from .core.offline_webhook import OfflineWebhookServer
 from .rendering.html_renderer import cleanup_renderer, set_bg_dir
 from .tools.admin import AdminToolsMixin
 from .tools.approval_shortcuts import ApprovalShortcutMixin
@@ -63,7 +64,7 @@ def _is_health_workflow_name(value: object) -> bool:
     "ncqq_manager",
     "memoriass",
     "NapCatQQ 容器控制与后端路由插件",
-    "2.2.0-beta.3",
+    "2.2.0-beta.4",
     "https://github.com/memoriass/astrbot_plugin_ncqq_manager",
 )
 class NCQQManagerPlugin(
@@ -86,10 +87,12 @@ class NCQQManagerPlugin(
         set_bg_dir(bg_dir)
         self.register_page_apis()
         self._health_cron_job = None
+        self._offline_webhook_server = OfflineWebhookServer(self)
 
     async def initialize(self):
         """Register health check cron job if enabled."""
         await self._register_health_cron()
+        await self._offline_webhook_server.start()
 
     async def _register_health_cron(self):
         """(Re)register health check cron job based on current config."""
@@ -126,6 +129,7 @@ class NCQQManagerPlugin(
 
     async def terminate(self):
         """插件卸载/重载时清理资源。"""
+        await self._offline_webhook_server.stop()
         if self._health_cron_job:
             try:
                 await self.context.cron_manager.delete_job(self._health_cron_job.job_id)

@@ -5,6 +5,7 @@ import base64
 import datetime
 import html
 import pathlib
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from astrbot.api import logger
@@ -110,12 +111,224 @@ def _find_owners(
     return owners
 
 
+async def _load_health_snapshot(plugin: "NCQQManagerPlugin") -> dict[str, bool]:
+    raw = await plugin.get_kv_data("health_snapshot", {})
+    if not isinstance(raw, dict):
+        return {}
+    return {str(ref): value for ref, value in raw.items() if isinstance(value, bool)}
+
+
+async def notify_instance_status_changes(
+    plugin: "NCQQManagerPlugin",
+    newly_offline: Sequence[str],
+    newly_online: Sequence[str],
+    instance_meta: Mapping[str, tuple[str, str]] | None = None,
+    offline_details: Mapping[str, str] | None = None,
+    offline_qr_urls: Mapping[str, str] | None = None,
+) -> None:
+    """Notify owners and the configured group about status edge changes."""
+    if not newly_offline and not newly_online:
+        return
+
+    meta = instance_meta or {}
+    offline_detail_map = offline_details or {}
+    qr_url_map = offline_qr_urls or {}
+    notify_group = str(plugin.config.get("notify_group", "")).strip()
+    mapping = await plugin.get_user_mapping()
+
+    if newly_offline:
+        items_html_parts = []
+        owner_messages: dict[str, list[str]] = {}
+
+        for ref in newly_offline:
+            manager_id, name = meta.get(ref, plugin.split_instance_ref(ref))
+            owners = _find_owners(plugin, mapping, manager_id, name)
+            owner_label = ", ".join(
+                f"{nick or qq}" for qq, nick in owners
+            ) if owners else "未绑定"
+            detail = offline_detail_map.get(ref, "已掉线")
+            items_html_parts.append(
+                _build_alert_item(ref, "offline", detail, owner_label)
+            )
+
+            qr_url = qr_url_map.get(ref, "")
+            for qq_id, _nick in owners:
+                lines = owner_messages.setdefault(
+                    qq_id,
+                    ["⚠️ 以下绑定实例已掉线，请及时检查："],
+                )
+                lines.append(f"- {ref}：{detail}")
+                if qr_url:
+                    lines.append(f"  扫码链接：{qr_url}")
+
+        for qq_id, lines in owner_messages.items():
+            try:
+                lines.append("可发送「ncqq login <实例>」查看状态或「ncqq qrcode <实例>」重新扫码。")
+                mc = MessageChain()
+                mc.message("\n".join(lines))
+                await StarTools.send_message_by_id(
+                    type="PrivateMessage", id=qq_id, message_chain=mc
+                )
+            except Exception as e:
+                logger.warning("Failed to notify owner %s for offline alert: %s", qq_id, e)
+
+        if notify_group:
+            summary = f"共 {len(newly_offline)} 个实例变为离线"
+            items_html = "\n".join(items_html_parts)
+            rendered = await render_alert_card(
+                title="实例掉线告警",
+                icon="🔴",
+                items_html=items_html,
+                summary=summary,
+                accent_color="#e74c3c",
+            )
+            try:
+                mc = MessageChain()
+                if isinstance(rendered, bytes):
+                    mc.chain.append(Image.fromBase64(base64.b64encode(rendered).decode()))
+                else:
+                    mc.message(rendered)
+                await StarTools.send_message_by_id(
+                    type="GroupMessage", id=notify_group, message_chain=mc
+                )
+            except Exception as e:
+                logger.warning("Failed to send offline alert to group %s: %s", notify_group, e)
+
+    if newly_online:
+        items_html_parts = []
+        owner_messages: dict[str, list[str]] = {}
+
+        for ref in newly_online:
+            manager_id, name = meta.get(ref, plugin.split_instance_ref(ref))
+            owners = _find_owners(plugin, mapping, manager_id, name)
+            owner_label = ", ".join(
+                f"{nick or qq}" for qq, nick in owners
+            ) if owners else "未绑定"
+            items_html_parts.append(
+                _build_alert_item(ref, "recover", "已恢复上线", owner_label)
+            )
+
+            for qq_id, _nick in owners:
+                lines = owner_messages.setdefault(
+                    qq_id,
+                    ["✅ 以下绑定实例已恢复上线："],
+                )
+                lines.append(f"- {ref}")
+
+        for qq_id, lines in owner_messages.items():
+            try:
+                mc = MessageChain()
+                mc.message("\n".join(lines))
+                await StarTools.send_message_by_id(
+                    type="PrivateMessage", id=qq_id, message_chain=mc
+                )
+            except Exception as e:
+                logger.warning("Failed to notify owner %s for recover alert: %s", qq_id, e)
+
+        if notify_group:
+            summary = f"共 {len(newly_online)} 个实例恢复上线"
+            items_html = "\n".join(items_html_parts)
+            rendered = await render_alert_card(
+                title="实例恢复通知",
+                icon="🟢",
+                items_html=items_html,
+                summary=summary,
+                accent_color="#2ecc71",
+            )
+            try:
+                mc = MessageChain()
+                if isinstance(rendered, bytes):
+                    mc.chain.append(Image.fromBase64(base64.b64encode(rendered).decode()))
+                else:
+                    mc.message(rendered)
+                await StarTools.send_message_by_id(
+                    type="GroupMessage", id=notify_group, message_chain=mc
+                )
+            except Exception as e:
+                logger.warning("Failed to send recover alert to group %s: %s", notify_group, e)
+
+
+async def apply_health_snapshot(
+    plugin: "NCQQManagerPlugin",
+    current: dict[str, bool],
+    instance_meta: Mapping[str, tuple[str, str]],
+    *,
+    notify_first_seen: bool = False,
+) -> dict[str, list[str]]:
+    """Persist a complete online snapshot and notify about edge changes."""
+    prev = await _load_health_snapshot(plugin)
+    newly_offline: list[str] = []
+    newly_online: list[str] = []
+
+    for ref, online in current.items():
+        was_online = prev.get(ref)
+        if was_online is True and not online:
+            newly_offline.append(ref)
+        elif was_online is False and online:
+            newly_online.append(ref)
+        elif was_online is None and notify_first_seen:
+            if online:
+                newly_online.append(ref)
+            else:
+                newly_offline.append(ref)
+
+    await plugin.put_kv_data("health_snapshot", current)
+    await notify_instance_status_changes(
+        plugin,
+        newly_offline,
+        newly_online,
+        instance_meta,
+    )
+    return {"offline": newly_offline, "online": newly_online}
+
+
+async def apply_instance_status_event(
+    plugin: "NCQQManagerPlugin",
+    manager_id: str,
+    instance_name: str,
+    online: bool,
+    *,
+    notify_first_seen: bool = True,
+    offline_detail: str = "",
+    qr_url: str = "",
+) -> dict[str, object]:
+    """Apply one authoritative manager event to health_snapshot and notify once."""
+    normalized_manager = plugin.normalize_manager_id(manager_id)
+    ref = plugin.format_instance_ref(normalized_manager, instance_name)
+    snapshot = await _load_health_snapshot(plugin)
+    previous = snapshot.get(ref)
+    snapshot[ref] = online
+    await plugin.put_kv_data("health_snapshot", snapshot)
+
+    should_notify = previous != online and (previous is not None or notify_first_seen)
+    if should_notify:
+        meta = {ref: (normalized_manager, instance_name)}
+        if online:
+            await notify_instance_status_changes(plugin, [], [ref], meta)
+        else:
+            detail = offline_detail or "已掉线"
+            qr_urls = {ref: qr_url} if qr_url else {}
+            await notify_instance_status_changes(
+                plugin,
+                [ref],
+                [],
+                meta,
+                offline_details={ref: detail},
+                offline_qr_urls=qr_urls,
+            )
+
+    return {
+        "ref": ref,
+        "previous": previous,
+        "current": online,
+        "notified": should_notify,
+    }
+
+
 async def do_health_check(plugin: "NCQQManagerPlugin") -> None:
     """Core health check logic. Called by cron job."""
     if not plugin.config.get("enable_offline_notify", True):
         return
-
-    notify_group = str(plugin.config.get("notify_group", "")).strip()
 
     current: dict[str, bool] = {}
     instance_meta: dict[str, tuple[str, str]] = {}
@@ -144,136 +357,4 @@ async def do_health_check(plugin: "NCQQManagerPlugin") -> None:
     if not any_success:
         return
 
-    # Load previous snapshot
-    prev: dict[str, bool] = await plugin.get_kv_data("health_snapshot", {})
-
-    # Diff: find newly offline and newly recovered
-    newly_offline: list[str] = []
-    newly_online: list[str] = []
-
-    for name, online in current.items():
-        was_online = prev.get(name)
-        if was_online is True and not online:
-            newly_offline.append(name)
-        elif was_online is False and online:
-            newly_online.append(name)
-        # was_online is None → first seen, skip notification
-
-    # Save current snapshot
-    await plugin.put_kv_data("health_snapshot", current)
-
-    if not newly_offline and not newly_online:
-        return
-
-    mapping = await plugin.get_user_mapping()
-
-    # --- Notify for newly offline instances ---
-    if newly_offline:
-        items_html_parts = []
-        text_lines = ["🔴 以下实例掉线："]
-        notified_owners: set[str] = set()
-
-        for ref in newly_offline:
-            manager_id, name = instance_meta.get(ref, plugin.split_instance_ref(ref))
-            owners = _find_owners(plugin, mapping, manager_id, name)
-            owner_label = ", ".join(
-                f"{nick or qq}" for qq, nick in owners
-            ) if owners else "未绑定"
-            items_html_parts.append(
-                _build_alert_item(ref, "offline", "已掉线", owner_label)
-            )
-            text_lines.append(f"  • {ref}（归属: {owner_label}）")
-
-            # Private notify each owner
-            for qq_id, nick in owners:
-                if qq_id in notified_owners:
-                    continue
-                notified_owners.add(qq_id)
-                try:
-                    mc = MessageChain()
-                    mc.message(
-                        f"⚠️ 你的实例 {ref} 已掉线，请及时检查。\n"
-                        f"可发送「ncqq login {ref}」查看状态或「ncqq qrcode {ref}」重新扫码。"
-                    )
-                    await StarTools.send_message_by_id(
-                        type="PrivateMessage", id=qq_id, message_chain=mc
-                    )
-                except Exception as e:
-                    logger.warning("Failed to notify owner %s for %s: %s", qq_id, name, e)
-
-        # Group notification with image card
-        if notify_group:
-            summary = f"共 {len(newly_offline)} 个实例变为离线"
-            items_html = "\n".join(items_html_parts)
-            rendered = await render_alert_card(
-                title="实例掉线告警",
-                icon="🔴",
-                items_html=items_html,
-                summary=summary,
-                accent_color="#e74c3c",
-            )
-            try:
-                mc = MessageChain()
-                if isinstance(rendered, bytes):
-                    mc.chain.append(Image.fromBase64(base64.b64encode(rendered).decode()))
-                else:
-                    mc.message(rendered)
-                await StarTools.send_message_by_id(
-                    type="GroupMessage", id=notify_group, message_chain=mc
-                )
-            except Exception as e:
-                logger.warning("Failed to send offline alert to group %s: %s", notify_group, e)
-
-    # --- Notify for newly recovered instances ---
-    if newly_online:
-        items_html_parts = []
-        text_lines = ["🟢 以下实例已恢复："]
-        notified_owners: set[str] = set()
-
-        for ref in newly_online:
-            manager_id, name = instance_meta.get(ref, plugin.split_instance_ref(ref))
-            owners = _find_owners(plugin, mapping, manager_id, name)
-            owner_label = ", ".join(
-                f"{nick or qq}" for qq, nick in owners
-            ) if owners else "未绑定"
-            items_html_parts.append(
-                _build_alert_item(ref, "recover", "已恢复上线", owner_label)
-            )
-            text_lines.append(f"  • {ref}（归属: {owner_label}）")
-
-            # Private notify each owner
-            for qq_id, nick in owners:
-                if qq_id in notified_owners:
-                    continue
-                notified_owners.add(qq_id)
-                try:
-                    mc = MessageChain()
-                    mc.message(f"✅ 你的实例 {ref} 已恢复上线。")
-                    await StarTools.send_message_by_id(
-                        type="PrivateMessage", id=qq_id, message_chain=mc
-                    )
-                except Exception as e:
-                    logger.warning("Failed to notify owner %s for %s: %s", qq_id, name, e)
-
-        # Group notification with image card
-        if notify_group:
-            summary = f"共 {len(newly_online)} 个实例恢复上线"
-            items_html = "\n".join(items_html_parts)
-            rendered = await render_alert_card(
-                title="实例恢复通知",
-                icon="🟢",
-                items_html=items_html,
-                summary=summary,
-                accent_color="#2ecc71",
-            )
-            try:
-                mc = MessageChain()
-                if isinstance(rendered, bytes):
-                    mc.chain.append(Image.fromBase64(base64.b64encode(rendered).decode()))
-                else:
-                    mc.message(rendered)
-                await StarTools.send_message_by_id(
-                    type="GroupMessage", id=notify_group, message_chain=mc
-                )
-            except Exception as e:
-                logger.warning("Failed to send recover alert to group %s: %s", notify_group, e)
+    await apply_health_snapshot(plugin, current, instance_meta)

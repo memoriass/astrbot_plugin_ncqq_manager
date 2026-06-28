@@ -11,6 +11,7 @@
 | `core/config_reader.py` | 容器内配置文件读取。 |
 | `core/approval.py` | 审批 KV 队列、过期清理、原子领取。 |
 | `core/health_check.py` | 定时掉线检测和通知。 |
+| `core/offline_webhook.py` | 独立 HTTP 接收器，处理 ncqq-manager `plugin_api` 掉线 POST 并复用健康快照通知。 |
 
 维护约定：
 
@@ -18,3 +19,4 @@
 - 高权限用户侧操作不得绕过 `core/approval.py`。
 - 多面板调用必须从插件实例获取 `client_for_manager(manager_id)`，不要直接假设 `self.client` 是唯一面板。
 - 本层可以依赖 `rendering` 做健康告警图片，但不得依赖 `tools`。
+- 掉线 POST 接收器不得注册为 LLM 工具或 Plugin Pages API；它只做 ncqq-manager 到插件内部通知链路的 HTTP 入口。

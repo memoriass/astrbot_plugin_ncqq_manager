@@ -83,6 +83,38 @@
         "description": "实例健康检测的轮询间隔，单位分钟。建议 3~10 分钟。",
         "default": 5
     },
+    "enable_alert_webhook": {
+        "title": "接收掉线 POST 通知",
+        "type": "bool",
+        "description": "开启后启动独立本地 HTTP 接收器，用于接收 ncqq-manager plugin_api 规则发出的 login_lost 和 instance_offline POST 通知。",
+        "default": false
+    },
+    "alert_webhook_host": {
+        "title": "POST 通知监听地址",
+        "type": "string",
+        "description": "掉线 POST 接收器监听地址。默认只监听 127.0.0.1；如改为 0.0.0.0 或公网地址，必须配置 token。",
+        "default": "127.0.0.1"
+    },
+    "alert_webhook_port": {
+        "title": "POST 通知监听端口",
+        "type": "int",
+        "description": "掉线 POST 接收器监听端口。ncqq-manager 规则中的 webhook_url 需要指向该端口。",
+        "default": 6198
+    },
+    "alert_webhook_path": {
+        "title": "POST 通知路径",
+        "type": "string",
+        "description": "掉线 POST 接收路径。示例：/ncqq-manager/alerts。",
+        "default": "/ncqq-manager/alerts"
+    },
+    "alert_webhook_token": {
+        "title": "POST 通知 Token",
+        "type": "string",
+        "description": "可选鉴权 token。ncqq-manager webhook_url 可追加 ?token=...；若监听非 loopback 地址则必须配置。",
+        "default": "",
+        "password": true,
+        "render_type": "password"
+    },
     "dashboard_stream_threshold": {
         "title": "面板直出卡片上限",
         "type": "int",

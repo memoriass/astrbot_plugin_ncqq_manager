@@ -6,7 +6,7 @@
 
 | 路径 | 职责 |
 | --- | --- |
-| `main.py` | AstrBot 插件类入口，注册 LLM 工具、`/ncqq` 命令、群白名单、管理员判断、用户绑定和审批快捷回复。 |
+| `main.py` | AstrBot 插件类入口，注册 LLM 工具、`/ncqq` 命令、群白名单、管理员判断、用户绑定、审批快捷回复和内部服务生命周期。 |
 | `__init__.py` | 导出插件类。 |
 | `metadata.yaml` | AstrBot 插件元信息。 |
 | `_conf_schema.json` | AstrBot 配置项定义。 |
@@ -17,7 +17,7 @@
 
 | 目录 | 职责 |
 | --- | --- |
-| `core/` | ncqq-manager HTTP 客户端、底层 API 动作、监控查询、审批 KV、健康检测和二维码交互。 |
+| `core/` | ncqq-manager HTTP 客户端、底层 API 动作、监控查询、审批 KV、健康检测、掉线 POST 接收和二维码交互。 |
 | `tools/` | AstrBot 工具混入，承接命令和 LLM 入口调用。 |
 | `workflows/` | 面向聊天侧的业务 workflow 编排，只暴露明确 workflow ID。 |
 | `rendering/` | HTML 模板转图片能力。 |
@@ -90,6 +90,8 @@
 - `check_bot_runtime`
 
 只用于公开入口识别并阻断，不进入 workflow 调度。公开入口必须直接忽略或拒绝健康类调用，避免承接通用系统、其他插件或外部服务的健康检查。健康聚合只覆盖 ncqq-manager 管理器健康、BotShepherd 状态、Bot runtime、容器列表和后端端点，后端端点读取失败应显示 WARN。
+
+ncqq-manager `plugin_api` 掉线 POST 由 `core/offline_webhook.py` 的独立 aiohttp 接收器处理。它不注册为 LLM 工具，也不注册到 Plugin Pages API；入口只接受机器对机器 POST，并把事件落到 `health_snapshot` 后复用 `core/health_check.py` 的通知函数。
 
 ## 文档维护
 

@@ -22,7 +22,7 @@
 | 大文件限制 | Python、Markdown、JSON、YAML、HTML 文件均低于 500 行。 |
 | 发布包清洁度 | 不提交 Python 缓存、日志、本地配置、临时文档和未使用候选资产。 |
 
-当前 beta 版本号为 `2.2.0-beta.3`，`metadata.yaml` 与 `main.py` 的 `@register(...)` 必须保持一致。
+当前 beta 版本号为 `2.2.0-beta.4`，`metadata.yaml` 与 `main.py` 的 `@register(...)` 必须保持一致。
 
 ## Plugin Pages 边界
 
